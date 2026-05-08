@@ -1,0 +1,39 @@
+# User data — never commit personal magazine photos
+images/
+*.JPG
+*.jpg
+*.jpeg
+*.JPEG
+*.png
+
+# Generated reports and caches
+phash_cache.json
+duplicates_report.txt
+duplicates_report.html
+analysis_cache.json
+grouping_results.json
+_thumbs/
+_backup_*/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.venv/
+venv/
+env/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

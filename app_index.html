@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Magazine Duplicates</title>
+<style>
+:root {
+  --bg: #0d0d0f;
+  --bg-card: #16171a;
+  --bg-elev: #1f2025;
+  --border: #25272d;
+  --border-strong: #34373f;
+  --text: #e8e8ea;
+  --text-dim: #8a8d96;
+  --text-muted: #5c5f68;
+  --accent: #5b8def;
+  --accent-hover: #7aa3f5;
+  --keep: #4ea866;
+  --remove: #c95555;
+  --warn: #d4a047;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); }
+body {
+  font: 13px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ─── Toolbar ───────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  background: linear-gradient(180deg, #1a1b1f 0%, #131418 100%);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 5;
+}
+
+.brand {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: var(--text);
+  margin-right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.brand::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 7px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) {
+  background: var(--bg-elev);
+  border-color: var(--border-strong);
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+.btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.folder-display {
+  flex: 1;
+  min-width: 200px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 6px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.folder-display.empty { color: var(--text-muted); font-style: italic; font-family: inherit; }
+
+.threshold-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.threshold-group label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.threshold-group input[type="range"] {
+  width: 100px;
+  accent-color: var(--accent);
+}
+.threshold-group .val {
+  min-width: 28px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ─── Status bar (below toolbar, shows progress) ──────────── */
+.status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-dim);
+  min-height: 36px;
+  flex-shrink: 0;
+}
+.status .phase {
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-elev);
+  color: var(--text-dim);
+}
+.status .phase.active { background: var(--accent); color: #fff; }
+.status .phase.done { background: var(--keep); color: #fff; }
+.status .progress-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-elev);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+.status .progress-fill {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width 0.2s ease;
+}
+.status .stats {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.status .stats strong { color: var(--text); }
+
+/* ─── Main content area (iframe) ─────────────────────────── */
+.content {
+  flex: 1;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  text-align: center;
+  padding: 40px;
+  color: var(--text-dim);
+}
+.empty-state .icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.4;
+}
+.empty-state h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text);
+}
+.empty-state p {
+  margin: 0 0 20px;
+  max-width: 460px;
+  line-height: 1.6;
+  font-size: 13px;
+}
+.empty-state code {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  color: var(--text);
+}
+
+iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg);
+}
+
+/* ─── Error toast ─────────────────────────────────────────── */
+.toast {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--remove);
+  color: var(--text);
+  padding: 12px 16px;
+  border-radius: 6px;
+  max-width: 400px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  z-index: 100;
+  font-size: 12px;
+  display: none;
+}
+.toast.visible { display: block; }
+.toast .close {
+  float: right;
+  margin-left: 12px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.toast .close:hover { color: var(--text); }
+.toast strong { color: var(--remove); display: block; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <span class="brand">Magazine Duplicates</span>
+
+  <button class="btn" onclick="pickFolder()">📁 Open folder…</button>
+  <div class="folder-display empty" id="folder-display">No folder selected</div>
+
+  <div class="threshold-group">
+    <label>Threshold</label>
+    <input type="range" min="20" max="100" value="60" step="2" id="threshold" oninput="onThresholdChange()">
+    <span class="val" id="threshold-val">60</span>
+  </div>
+
+  <button class="btn primary" id="analyze-btn" onclick="runAnalysis()" disabled>▶ Analyze</button>
+  <button class="btn" id="reveal-btn" onclick="revealFolder()" disabled title="Open folder in file explorer">📂</button>
+</div>
+
+<div class="status" id="status">
+  <span class="phase" id="status-phase">IDLE</span>
+  <span id="status-text">Pick a folder to begin.</span>
+  <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+  <span class="stats" id="status-stats"></span>
+</div>
+
+<div class="content">
+  <div class="empty-state" id="empty-state">
+    <div class="icon">🗂️</div>
+    <h2>No analysis yet</h2>
+    <p>
+      Pick a folder containing magazine photos (named like
+      <code>2026_05_08_NME_0611.JPG</code>), choose a match threshold, then click <strong>Analyze</strong>.
+      <br><br>
+      Lower threshold = stricter matches. <code>40–60</code> works well for most collections.
+    </p>
+  </div>
+  <iframe id="report" style="display:none"></iframe>
+</div>
+
+<div class="toast" id="toast">
+  <span class="close" onclick="hideToast()">×</span>
+  <strong id="toast-title">Error</strong>
+  <span id="toast-body"></span>
+</div>
+
+<script>
+let currentFolder = null;
+let isAnalyzing = false;
+
+function setStatus(phase, text, progressPct = null) {
+  const phaseEl = document.getElementById('status-phase');
+  phaseEl.textContent = phase.toUpperCase();
+  phaseEl.className = 'phase';
+  if (phase === 'idle') phaseEl.classList.add('');
+  else if (phase === 'done') phaseEl.classList.add('done');
+  else phaseEl.classList.add('active');
+
+  document.getElementById('status-text').textContent = text;
+  if (progressPct !== null) {
+    document.getElementById('progress-fill').style.width = progressPct + '%';
+  }
+}
+
+function setStats(stats) {
+  if (!stats) {
+    document.getElementById('status-stats').innerHTML = '';
+    return;
+  }
+  document.getElementById('status-stats').innerHTML =
+    `<strong>${stats.total_images}</strong> photos · ` +
+    `<strong>${stats.total_groups}</strong> duplicates · ` +
+    `<strong>${stats.triple_plus}</strong> with 3+ copies`;
+}
+
+function showToast(title, body) {
+  document.getElementById('toast-title').textContent = title;
+  document.getElementById('toast-body').textContent = body;
+  document.getElementById('toast').classList.add('visible');
+}
+function hideToast() { document.getElementById('toast').classList.remove('visible'); }
+
+function onThresholdChange() {
+  document.getElementById('threshold-val').textContent = document.getElementById('threshold').value;
+}
+
+async function pickFolder() {
+  if (isAnalyzing) return;
+  try {
+    const folder = await window.pywebview.api.pick_folder();
+    if (folder) {
+      currentFolder = folder;
+      const disp = document.getElementById('folder-display');
+      disp.textContent = folder;
+      disp.classList.remove('empty');
+      document.getElementById('analyze-btn').disabled = false;
+      document.getElementById('reveal-btn').disabled = false;
+      setStatus('ready', 'Folder selected. Click Analyze to run.');
+    }
+  } catch (e) {
+    showToast('Folder picker failed', e.message || String(e));
+  }
+}
+
+async function runAnalysis() {
+  if (!currentFolder || isAnalyzing) return;
+  isAnalyzing = true;
+  document.getElementById('analyze-btn').disabled = true;
+  document.getElementById('progress-fill').style.width = '0%';
+  setStats(null);
+  setStatus('starting', 'Starting analysis…', 0);
+
+  const threshold = parseInt(document.getElementById('threshold').value);
+
+  try {
+    const result = await window.pywebview.api.analyze(currentFolder, threshold);
+    if (result.success) {
+      setStatus('done', `Done — report ready.`, 100);
+      setStats(result.stats);
+      // Show the iframe with the generated report
+      const iframe = document.getElementById('report');
+      iframe.src = result.report_url + '?t=' + Date.now(); // bust cache
+      iframe.style.display = 'block';
+      document.getElementById('empty-state').style.display = 'none';
+    } else {
+      showToast('Analysis failed', result.error || 'Unknown error');
+      setStatus('idle', 'Analysis failed.');
+    }
+  } catch (e) {
+    showToast('Analysis failed', e.message || String(e));
+    setStatus('idle', 'Analysis failed.');
+  } finally {
+    isAnalyzing = false;
+    document.getElementById('analyze-btn').disabled = !currentFolder;
+  }
+}
+
+async function revealFolder() {
+  if (!currentFolder) return;
+  try {
+    await window.pywebview.api.open_in_explorer(currentFolder);
+  } catch (e) {
+    showToast('Could not open folder', e.message || String(e));
+  }
+}
+
+// Called by Python during analysis to update progress
+window.onProgress = function (n, total, phase) {
+  const phaseLabels = {
+    scan:   'Scanning files…',
+    hash:   `Hashing images (${n} / ${total})`,
+    match:  'Finding duplicate matches…',
+    render: 'Generating report…',
+  };
+  const text = phaseLabels[phase] || `${phase}: ${n}/${total}`;
+  const pct = (phase === 'hash' && total > 0) ? Math.round((n / total) * 100) : null;
+  setStatus(phase, text, pct);
+};
+
+// Wait for pywebview API to be ready
+window.addEventListener('pywebviewready', () => {
+  setStatus('idle', 'Pick a folder to begin.');
+});
+</script>
+</body>
+</html>

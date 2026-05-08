@@ -1,0 +1,74 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed by softprops/action-gh-release to attach assets
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            data_sep: ';'
+            artifact_name: DuplicateFinder-windows
+            artifact_path: dist/DuplicateFinder.exe
+            release_asset: dist/DuplicateFinder.exe
+          - os: macos-latest
+            data_sep: ':'
+            artifact_name: DuplicateFinder-macos
+            artifact_path: DuplicateFinder-macos.zip
+            release_asset: DuplicateFinder-macos.zip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build binary
+        shell: bash
+        run: |
+          pyinstaller --onefile --windowed --name DuplicateFinder \
+            --add-data "app_index.html${{ matrix.data_sep }}." \
+            --collect-all webview \
+            --hidden-import find_duplicates_local \
+            app.py
+
+      - name: Package macOS .app as zip
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd dist
+          zip -r ../DuplicateFinder-macos.zip DuplicateFinder.app
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_path }}
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.release_asset }}
+          fail_on_unmatched_files: false
+          generate_release_notes: true
