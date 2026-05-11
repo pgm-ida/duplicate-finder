@@ -1,91 +1,150 @@
-# Duplicate Finder
+# Duplicate
 
-A desktop app that finds duplicate magazines, records, posters, books, or any other physical artifacts you've photographed — by analyzing the photos themselves. Runs entirely locally, no API keys or cloud services needed.
+A desktop app that flags duplicate magazines, books, or any other physical
+artifacts as you photograph them — runs entirely locally, no API keys, no
+cloud services. Built for sellers and archivists working through stacks
+where you can't easily tell at a glance which titles you already have.
 
 ## Download
 
-Get the latest pre-built app from the [Releases page](../../releases/latest):
+Get the latest `DuplicateFinder.exe` from the
+[Releases page](../../releases/latest), double-click to run.
 
-- **Windows**: `DuplicateFinder.exe` — double-click to run
-- **macOS**: `DuplicateFinder-macos.zip` — unzip, then double-click `DuplicateFinder.app`
+> First launch on Windows: dismiss SmartScreen with "More info → Run anyway".
+> The binary isn't code-signed (no certificate yet), but you can also build
+> it yourself — see below.
 
-> First time on macOS: right-click → Open (instead of double-click) to bypass the "unidentified developer" warning.
+## Two modes
 
-## How it works
+Tabs in the top bar switch between them.
 
-1. Photograph each item in your collection sequentially. Use a consistent naming convention: `YYYY_MM_DD_CollectionName_NNNN.JPG` (e.g. `2026_05_08_NME_0001.JPG`)
-2. Open the app, point it at the folder containing the photos
-3. Click **Analyze** — it will:
-   - Compute a perceptual hash of every photo (locally, ~25 images/sec)
-   - Find pairs of photos that show the same physical item
-   - Group consecutive photos into "physical copies" (using sequence numbers + parallel-evidence merging)
-   - Report which items appear multiple times in the stack
-4. Visually verify each duplicate using the built-in lightbox, mark them confirmed/dismissed (state persists in browser localStorage)
-5. Walk to your physical stack and remove the duplicate copies
+### Shoot — live tethered duplicate check
 
-## File naming convention
+The primary workflow. You photograph magazines one at a time and the app
+tells you instantly whether each one is a duplicate.
 
-Files must be named `YYYY_MM_DD_PublicationName_NNNN.JPG` where:
-- `YYYY_MM_DD` — date the photos were taken
-- `PublicationName` — collection name (e.g. `NME`, `Recordmirror`, `Books`)
-- `NNNN` — 4-digit sequence number representing the position in the physical stack
+1. **Setup** (one-time):
+   - Watch folder — where your camera software (e.g. EOS Utility) drops
+     new JPGs
+   - Library folder — where the app organizes per-magazine subfolders
+   - Duplicates folder — where confirmed duplicates get moved (defaults to
+     `<library>/_duplicates`)
+   - Hotkey — click the field and press the combo you want (e.g. `Alt+N`)
+2. **Click Start watching**.
+3. Press the hotkey **before each magazine** to open a fresh folder.
+4. Shoot the **front cover first**. The moment it lands, the app compares
+   it against every cover in the library and shows a verdict:
+   - ✓ **UNIQUE** — keep shooting (back, colofon, index)
+   - ⚠ **DUPLICATE** — set the physical magazine aside for resale, click
+     **Move to duplicates**, and rotate to the next magazine
+   - ? **UNCERTAIN** — verify visually, then either accept or move on
+5. Continue with remaining photos for unique magazines (back cover, colofon,
+   etc.); they auto-crop and stack into the magazine folder.
 
-Example layout:
+The thumbnail strip below the status bar shows everything in the current
+magazine, and any photos that arrived late (after a rotation, routed by
+EXIF time into the previous magazine) get a yellow border.
+
+**Why cover-only**: interior pages — masthead, colofon, page index — are
+nearly identical across unrelated issues and cause false-positive matches
+in full-magazine comparison. The cover is the only page that reliably
+identifies one issue.
+
+### Library / batch — analyze an existing folder
+
+For collections you've already photographed in bulk. Pick a folder of
+sequentially-named JPGs (`YYYY_MM_DD_PublicationName_NNNN.JPG`), set a
+match threshold, click **Analyze**. Generates an interactive HTML report
+of every duplicate group with a side-by-side lightbox for visual
+verification.
+
+Filenames must follow the convention so the grouper can split consecutive
+photos into per-magazine units:
 
 ```
-my_archive/
-├── 2026_05_08_NME_0001.JPG       # First magazine, front
-├── 2026_05_08_NME_0002.JPG       # First magazine, back
-├── 2026_05_08_NME_0003.JPG       # Second magazine, front
-├── 2026_05_08_NME_0004.JPG       # Second magazine, back
-└── 2026_05_08_NME_0005.JPG       # Third magazine, front
+2026_05_08_NME_0001.JPG   # mag 1, front
+2026_05_08_NME_0002.JPG   # mag 1, back
+2026_05_08_NME_0003.JPG   # mag 2, front
+…
 ```
 
-The sequence number is what lets the app tell you exactly which physical paper to remove from your stack.
+**Threshold guide**:
+- **20–30** — strict, only near-identical matches
+- **40–50** — balanced
+- **60** — recommended, catches most copies including 3+ duplicate sets
+- **70+** — loose, catches degraded duplicates but produces more false positives
 
-## Tuning
+## How the detection works
 
-The **Threshold** slider controls how lenient the duplicate detection is:
+Each photo passes through a local pipeline:
 
-- **20–30** (strict): only nearly-identical photos match. Low false positives, but misses duplicates with significant lighting/angle differences.
-- **40–50** (balanced): catches most real duplicates with few false positives.
-- **60** (recommended): catches most copies including 3+ duplicate sets. Some false positives, but the verification UI lets you dismiss them quickly.
-- **70+** (loose): catches even degraded duplicates. Expect to dismiss a third of matches as coincidental layout overlaps.
+1. **Auto-crop** — `crop_magazine` finds the magazine rectangle in the
+   frame and cuts away background.
+2. **Perceptual hashing** — pHash + dHash, both 64-bit. Hamming distance
+   between hashes is the similarity score.
+3. **OCR date extraction** — Tesseract pulls cover dates from the cropped
+   image. A shared date between two covers boosts the match confidence
+   significantly.
+
+The bundled `.exe` ships with Tesseract and the English language model
+inside (~70 MB of the binary's size).
 
 ## Run from source
 
-If you don't want to use the prebuilt binaries, or you want to modify the app:
-
-```bash
-git clone https://github.com/YOUR_USERNAME/duplicate-finder.git
+```powershell
+git clone https://github.com/pgm-ida/duplicate-finder.git
 cd duplicate-finder
 pip install -r requirements.txt
+# Windows: scoop install tesseract  (or install Tesseract any way you like
+# and make sure tesseract.exe is on PATH)
 python app.py
 ```
 
-Works on Windows, macOS, and Linux. Requires Python 3.10+.
+Requires Python 3.10+. Tesseract must be reachable on `PATH` (or override
+via `pytesseract.pytesseract.tesseract_cmd`).
 
-## Build a binary yourself
+## Build the binary
 
-```bash
-pip install pyinstaller
-pyinstaller --onefile --windowed --name DuplicateFinder \
-  --add-data "app_index.html:." --collect-all webview app.py
+```powershell
+.\build.ps1
 ```
 
-Output: `dist/DuplicateFinder.exe` (Windows) or `dist/DuplicateFinder.app` (macOS).
+The script:
+1. Stages a Tesseract bundle from your scoop install into
+   `_tesseract_bundle/`
+2. Regenerates `icon.ico` from `make_icon.py` (the two-pill Ditto mark)
+3. Runs PyInstaller with `--onefile --windowed`, embedding the icon,
+   HTML, and Tesseract bundle
 
-> Note: the separator between the source and destination paths in `--add-data` is `;` on Windows and `:` on macOS/Linux.
+Output: `dist\DuplicateFinder.exe` (~150 MB — most of it is OpenCV,
+NumPy/SciPy, and Tesseract).
 
-## CLI usage
+If you don't have Tesseract via scoop, edit the `$tessSrc` path at the
+top of `build.ps1` to wherever your `tesseract.exe` lives.
 
-If you'd rather not use the GUI, the analysis pipeline is also available as a command-line tool:
+## CLI
 
-```bash
-python find_duplicates_local.py /path/to/folder --threshold 60
+The batch pipeline is also a standalone CLI:
+
+```powershell
+python find_duplicates_local.py <folder> --threshold 60
 ```
 
-This generates an `duplicates_report.html` and a plain-text `duplicates_report.txt` in the folder.
+Outputs `duplicates_report.html` and `duplicates_report.txt` in the
+folder.
+
+## Project layout
+
+| File | Role |
+|---|---|
+| `app.py` | pywebview entry point, JS↔Python bridge |
+| `app_index.html` | Single-page UI (Shoot tab + Library tab) |
+| `tether.py` | Live watcher: hotkey, file events, cover-only verdict |
+| `find_duplicates_local.py` | Batch analysis pipeline + HTML report |
+| `make_icon.py` | Renders `icon.ico` from the Ditto mark |
+| `build.ps1` | One-command build (Tesseract staging + PyInstaller) |
+| `migrate.py` | One-shot migration from flat folder → per-magazine subfolders |
+| `test_accuracy.py` | Synthetic precision/recall harness |
 
 ## License
 
