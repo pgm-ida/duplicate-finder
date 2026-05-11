@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Magazine Duplicates</title>
+<title>Duplicate</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 220'><rect width='220' height='220' rx='48' fill='%23f3f0e8'/><rect x='42' y='60' width='44' height='100' rx='22' fill='%23111111'/><rect x='134' y='60' width='44' height='100' rx='22' fill='%23111111'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg: #0d0d0f;
@@ -29,37 +33,69 @@ body {
   overflow: hidden;
 }
 
-/* ─── Toolbar ───────────────────────────────────────────────── */
-.toolbar {
+/* ─── Mode tabs ──────────────────────────────────────────── */
+.mode-tabs {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 16px;
-  background: linear-gradient(180deg, #1a1b1f 0%, #131418 100%);
   border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, #1a1b1f 0%, #131418 100%);
   flex-shrink: 0;
-  z-index: 5;
+}
+.mode-tab {
+  padding: 12px 24px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: 600 13px/1 inherit;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.mode-tab:hover { color: var(--text); }
+.mode-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.mode-tab .badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .brand {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.2px;
-  color: var(--text);
-  margin-right: 8px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding: 0 18px;
+  color: var(--text);
 }
-.brand::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  background: var(--accent);
-  border-radius: 50%;
-  display: inline-block;
+.brand-mark {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: var(--text);
+}
+.brand-word {
+  font-family: "Archivo Black", Impact, "Arial Black", system-ui, sans-serif;
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  /* Archivo Black is already very heavy — squeeze the tracking lightly so
+     it reads as a wordmark, not paragraph text. */
 }
 
+.mode-content {
+  flex: 1;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mode-content.active { display: flex; }
+
+/* ─── Shared button styles ───────────────────────────────── */
 .btn {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -75,25 +111,327 @@ body {
   transition: all 0.15s;
   white-space: nowrap;
 }
-.btn:hover:not(:disabled) {
-  background: var(--bg-elev);
-  border-color: var(--border-strong);
+.btn:hover:not(:disabled) { background: var(--bg-elev); border-color: var(--border-strong); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+.btn.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn.danger { background: var(--remove); border-color: var(--remove); color: #fff; }
+.btn.danger:hover:not(:disabled) { background: #d96b6b; border-color: #d96b6b; }
+.btn.success { background: var(--keep); border-color: var(--keep); color: #fff; }
+
+input[type="text"], input[type="number"] {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 7px 10px;
+  font: 12px/1.4 inherit;
+  border-radius: 5px;
+  outline: none;
 }
-.btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+input:focus { border-color: var(--accent); }
+
+/* ─── SHOOT MODE ─────────────────────────────────────────── */
+.shoot {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
 }
-.btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  font-weight: 500;
+.shoot-side {
+  width: 360px;
+  padding: 18px 20px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
 }
-.btn.primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+.shoot-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
+.cfg {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+.cfg h3 {
+  margin: 0 0 12px;
+  font-size: 11px;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.cfg .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.cfg .row:last-child { margin-bottom: 0; }
+.cfg label {
+  font-size: 11px;
+  color: var(--text-dim);
+  min-width: 72px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.cfg .path-row input { flex: 1; min-width: 0; }
+.cfg .row .grow { flex: 1; }
+.cfg .hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.controls .btn { flex: 1; justify-content: center; }
+
+/* Status panel — center-stage */
+.status-strip {
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--bg-card);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  display: inline-block;
+}
+.status-dot.running { background: var(--keep); box-shadow: 0 0 8px var(--keep); }
+.status-dot.error { background: var(--remove); }
+.status-strip .field { color: var(--text-dim); }
+.status-strip .field strong { color: var(--text); font-weight: 600; }
+
+/* The big card for the most recent verdict */
+.verdict-card {
+  margin: 24px;
+  padding: 32px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  transition: all 0.25s;
+}
+.verdict-card.idle { color: var(--text-dim); }
+.verdict-card.unique {
+  background: linear-gradient(135deg, rgba(78,168,102,0.18) 0%, var(--bg-card) 60%);
+  border-color: var(--keep);
+}
+.verdict-card.duplicate {
+  background: linear-gradient(135deg, rgba(201,85,85,0.20) 0%, var(--bg-card) 60%);
+  border-color: var(--remove);
+  animation: flash 0.35s ease-out;
+}
+.verdict-card.uncertain {
+  background: linear-gradient(135deg, rgba(212,160,71,0.18) 0%, var(--bg-card) 60%);
+  border-color: var(--warn);
+}
+@keyframes flash {
+  0% { transform: scale(0.98); }
+  50% { transform: scale(1.015); }
+  100% { transform: scale(1); }
+}
+.verdict-card .vbig {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin: 4px 0 8px;
+}
+.verdict-card.unique .vbig { color: var(--keep); }
+.verdict-card.duplicate .vbig { color: var(--remove); }
+.verdict-card.uncertain .vbig { color: var(--warn); }
+.verdict-card .vlabel {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.verdict-card .vmag {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 14px;
+}
+.verdict-card .vinfo {
+  font-size: 13px;
+  color: var(--text-dim);
+  max-width: 600px;
+  line-height: 1.6;
+}
+.verdict-card .vinfo .match-name {
+  color: var(--text);
+  font-weight: 600;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+.verdict-card .vchips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 12px;
+}
+.vchip {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  padding: 4px 9px;
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+.vactions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.vactions:empty { display: none; }
+
+/* Hotkey recorder input */
+.hotkey-input {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 7px 10px;
+  font: 12px/1.4 inherit;
+  border-radius: 5px;
+  outline: none;
+  cursor: pointer;
+  width: 110px;
+  text-align: center;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+.hotkey-input.recording {
+  border-color: var(--accent);
+  background: rgba(91,141,239,0.12);
+  color: var(--accent);
+  animation: pulse 1.2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(91,141,239,0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(91,141,239,0); }
+}
+
+/* Thumbnail strip — current magazine */
+.thumb-strip-wrap {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+  flex-shrink: 0;
+}
+.thumb-strip-head {
+  padding: 8px 24px 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+.thumb-strip {
+  display: flex;
+  gap: 8px;
+  padding: 8px 24px 12px;
+  overflow-x: auto;
+  min-height: 78px;
+  scrollbar-width: thin;
+}
+.thumb-strip .empty-thumbs {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: italic;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 18px 0;
+}
+.thumb {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  overflow: hidden;
+}
+.thumb .thumb-num {
+  position: absolute;
+  bottom: 1px;
+  right: 2px;
+  background: rgba(0,0,0,0.65);
+  color: #fff;
+  font-size: 9px;
+  padding: 0 3px;
+  border-radius: 2px;
+  font-family: ui-monospace, monospace;
+}
+.thumb.late {
+  border-color: var(--warn);
+}
+
+/* Log */
+.log-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0 24px 18px;
+  min-height: 0;
+}
+.log-wrap h3 {
+  margin: 6px 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+.log {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  overflow-y: auto;
+  font: 11px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: var(--text-dim);
+}
+.log .entry { margin: 2px 0; }
+.log .ts { color: var(--text-muted); margin-right: 8px; }
+.log .entry.error { color: var(--remove); }
+.log .entry.event { color: var(--text); }
+.log .entry.verdict { color: var(--accent); font-weight: 600; }
+
+/* ─── LIBRARY MODE (legacy batch-analysis UI) ────────────── */
+.lib-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  background: linear-gradient(180deg, #1a1b1f 0%, #131418 100%);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
 .folder-display {
   flex: 1;
   min-width: 200px;
@@ -109,7 +447,6 @@ body {
   border-radius: 5px;
 }
 .folder-display.empty { color: var(--text-muted); font-style: italic; font-family: inherit; }
-
 .threshold-group {
   display: flex;
   align-items: center;
@@ -125,20 +462,10 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
-.threshold-group input[type="range"] {
-  width: 100px;
-  accent-color: var(--accent);
-}
-.threshold-group .val {
-  min-width: 28px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  font-weight: 600;
-}
+.threshold-group input[type="range"] { width: 100px; accent-color: var(--accent); }
+.threshold-group .val { min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 600; }
 
-/* ─── Status bar (below toolbar, shows progress) ──────────── */
-.status {
+.lib-status {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -150,7 +477,7 @@ body {
   min-height: 36px;
   flex-shrink: 0;
 }
-.status .phase {
+.lib-status .phase {
   text-transform: uppercase;
   letter-spacing: 0.6px;
   font-size: 10px;
@@ -160,81 +487,22 @@ body {
   background: var(--bg-elev);
   color: var(--text-dim);
 }
-.status .phase.active { background: var(--accent); color: #fff; }
-.status .phase.done { background: var(--keep); color: #fff; }
-.status .progress-bar {
-  flex: 1;
-  height: 4px;
-  background: var(--bg-elev);
-  border-radius: 2px;
-  overflow: hidden;
-  position: relative;
-}
-.status .progress-fill {
-  height: 100%;
-  background: var(--accent);
-  width: 0%;
-  transition: width 0.2s ease;
-}
-.status .stats {
-  font-variant-numeric: tabular-nums;
-  font-size: 11px;
-}
-.status .stats strong { color: var(--text); }
+.lib-status .phase.active { background: var(--accent); color: #fff; }
+.lib-status .phase.done { background: var(--keep); color: #fff; }
+.lib-status .progress-bar { flex: 1; height: 4px; background: var(--bg-elev); border-radius: 2px; overflow: hidden; }
+.lib-status .progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.2s ease; }
+.lib-status .stats { font-variant-numeric: tabular-nums; font-size: 11px; }
+.lib-status .stats strong { color: var(--text); }
 
-/* ─── Main content area (iframe) ─────────────────────────── */
-.content {
-  flex: 1;
-  display: flex;
-  position: relative;
-  overflow: hidden;
-}
+.lib-content { flex: 1; display: flex; position: relative; overflow: hidden; }
+.empty-state { flex: 1; display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; padding: 40px; color: var(--text-dim); }
+.empty-state .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.4; }
+.empty-state h2 { margin: 0 0 8px; font-size: 18px; font-weight: 500; color: var(--text); }
+.empty-state p { margin: 0 0 20px; max-width: 460px; line-height: 1.6; font-size: 13px; }
+.empty-state code { background: var(--bg-card); border: 1px solid var(--border); padding: 2px 6px; border-radius: 3px; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 11px; color: var(--text); }
+iframe { width: 100%; height: 100%; border: 0; background: var(--bg); }
 
-.empty-state {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  text-align: center;
-  padding: 40px;
-  color: var(--text-dim);
-}
-.empty-state .icon {
-  font-size: 48px;
-  margin-bottom: 16px;
-  opacity: 0.4;
-}
-.empty-state h2 {
-  margin: 0 0 8px;
-  font-size: 18px;
-  font-weight: 500;
-  color: var(--text);
-}
-.empty-state p {
-  margin: 0 0 20px;
-  max-width: 460px;
-  line-height: 1.6;
-  font-size: 13px;
-}
-.empty-state code {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-  font-size: 11px;
-  color: var(--text);
-}
-
-iframe {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: var(--bg);
-}
-
-/* ─── Error toast ─────────────────────────────────────────── */
+/* Toast */
 .toast {
   position: fixed;
   top: 16px;
@@ -251,53 +519,161 @@ iframe {
   display: none;
 }
 .toast.visible { display: block; }
-.toast .close {
-  float: right;
-  margin-left: 12px;
-  cursor: pointer;
-  color: var(--text-muted);
-}
+.toast .close { float: right; margin-left: 12px; cursor: pointer; color: var(--text-muted); }
 .toast .close:hover { color: var(--text); }
 .toast strong { color: var(--remove); display: block; margin-bottom: 4px; }
 </style>
 </head>
 <body>
 
-<div class="toolbar">
-  <span class="brand">Magazine Duplicates</span>
-
-  <button class="btn" onclick="pickFolder()">📁 Open folder…</button>
-  <div class="folder-display empty" id="folder-display">No folder selected</div>
-
-  <div class="threshold-group">
-    <label>Threshold</label>
-    <input type="range" min="20" max="100" value="60" step="2" id="threshold" oninput="onThresholdChange()">
-    <span class="val" id="threshold-val">60</span>
+<!-- ─── Mode tabs ────────────────────────────────────────── -->
+<div class="mode-tabs">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 220 220" aria-hidden="true">
+      <rect x="42" y="60" width="44" height="100" rx="22" ry="22" fill="currentColor"/>
+      <rect x="134" y="60" width="44" height="100" rx="22" ry="22" fill="currentColor"/>
+    </svg>
+    <span class="brand-word">DUPLICATE</span>
   </div>
-
-  <button class="btn primary" id="analyze-btn" onclick="runAnalysis()" disabled>▶ Analyze</button>
-  <button class="btn" id="reveal-btn" onclick="revealFolder()" disabled title="Open folder in file explorer">📂</button>
+  <button class="mode-tab active" data-mode="shoot">Shoot</button>
+  <button class="mode-tab" data-mode="library">Library / batch</button>
 </div>
 
-<div class="status" id="status">
-  <span class="phase" id="status-phase">IDLE</span>
-  <span id="status-text">Pick a folder to begin.</span>
-  <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-  <span class="stats" id="status-stats"></span>
+<!-- ─── SHOOT MODE ──────────────────────────────────────── -->
+<div class="mode-content active" id="mode-shoot">
+  <div class="shoot">
+    <aside class="shoot-side">
+      <div class="cfg">
+        <h3>Setup</h3>
+        <div class="row path-row">
+          <label>Watch</label>
+          <input type="text" id="cfg-watch" placeholder="EOS Utility output folder">
+          <button class="btn" onclick="pickDir('watch')">…</button>
+        </div>
+        <div class="row path-row">
+          <label>Library</label>
+          <input type="text" id="cfg-library" placeholder="Where magazine folders are stored">
+          <button class="btn" onclick="pickDir('library')">…</button>
+        </div>
+        <div class="row path-row">
+          <label>Dupes</label>
+          <input type="text" id="cfg-duplicates" placeholder="(default: &lt;library&gt;\_duplicates)">
+          <button class="btn" onclick="pickDir('duplicates')">…</button>
+        </div>
+        <div class="row">
+          <label>Pub</label>
+          <input type="text" id="cfg-publication" placeholder="NME" style="width: 100px">
+          <label style="min-width:auto">Hotkey</label>
+          <input type="text" id="cfg-hotkey" class="hotkey-input" value="&lt;alt&gt;+n" readonly
+                 title="Click and press the key combo you want">
+        </div>
+        <div class="row">
+          <label>Idle close</label>
+          <input type="number" id="cfg-auto-close" value="30" style="width: 60px"> <span class="hint">sec</span>
+          <label style="min-width:auto">Match thr.</label>
+          <input type="number" id="cfg-threshold" value="60" style="width: 60px">
+        </div>
+        <div class="row">
+          <label>Grace</label>
+          <input type="number" id="cfg-grace" value="3" min="0" max="15" style="width: 60px"> <span class="hint">sec drain after rotation</span>
+        </div>
+        <div class="row">
+          <label style="min-width:auto"><input type="checkbox" id="cfg-cover-check" checked>
+            Check duplicates on cover only</label>
+        </div>
+        <div class="hint">Settings persist to %APPDATA%\DuplicateFinder\</div>
+      </div>
+
+      <div class="controls">
+        <button class="btn primary" id="btn-start" onclick="startTether()">▶ Start watching</button>
+        <button class="btn danger" id="btn-stop" onclick="stopTether()" disabled>■ Stop</button>
+      </div>
+      <div class="controls">
+        <button class="btn success" id="btn-new-mag" onclick="manualNewMagazine()" disabled>＋ New magazine</button>
+        <button class="btn" id="btn-close-mag" onclick="manualCloseMagazine()" disabled>✓ Close & check</button>
+      </div>
+
+      <div class="cfg">
+        <h3>How it works</h3>
+        <div class="hint" style="margin-top: 0; line-height: 1.6">
+          1. Press <kbd>Alt+N</kbd> (or click <b>New magazine</b>) before shooting each magazine.<br>
+          2. EOS Utility saves photos into <i>Watch</i> as usual.<br>
+          3. Each photo gets auto-cropped &amp; moved into the current magazine folder.<br>
+          4. After <span id="ac-sec">30</span>s of no new photos (or next press of <kbd>Alt+N</kbd>), the magazine closes and is compared against your library. You get an instant verdict.
+        </div>
+      </div>
+    </aside>
+
+    <section class="shoot-main">
+      <div class="status-strip">
+        <span class="status-dot" id="tether-dot"></span>
+        <span class="field">Status: <strong id="tether-status">stopped</strong></span>
+        <span class="field">Magazine: <strong id="cur-mag">—</strong></span>
+        <span class="field">Photos: <strong id="cur-count">0</strong></span>
+        <span class="field" style="margin-left:auto">Hotkey: <strong id="cur-hotkey">—</strong></span>
+      </div>
+
+      <div class="thumb-strip-wrap">
+        <div class="thumb-strip-head">
+          <span>Current magazine</span>
+          <span id="thumb-strip-count"></span>
+        </div>
+        <div class="thumb-strip" id="thumb-strip">
+          <div class="empty-thumbs">No photos yet.</div>
+        </div>
+      </div>
+
+      <div class="verdict-card idle" id="verdict-card">
+        <div class="vlabel">Latest verdict</div>
+        <div class="vbig">—</div>
+        <div class="vmag" id="verdict-mag"></div>
+        <div class="vinfo" id="verdict-info">Press <kbd>Alt+N</kbd> to open the first magazine. Photos arriving in the watch folder will be cropped and added automatically.</div>
+        <div class="vchips" id="verdict-chips"></div>
+        <div class="vactions" id="verdict-actions"></div>
+      </div>
+
+      <div class="log-wrap">
+        <h3>Activity</h3>
+        <div class="log" id="log"></div>
+      </div>
+    </section>
+  </div>
 </div>
 
-<div class="content">
-  <div class="empty-state" id="empty-state">
-    <div class="icon">🗂️</div>
-    <h2>No analysis yet</h2>
-    <p>
-      Pick a folder containing magazine photos (named like
-      <code>2026_05_08_NME_0611.JPG</code>), choose a match threshold, then click <strong>Analyze</strong>.
-      <br><br>
-      Lower threshold = stricter matches. <code>40–60</code> works well for most collections.
-    </p>
+<!-- ─── LIBRARY MODE (legacy batch analysis) ────────────── -->
+<div class="mode-content" id="mode-library">
+  <div class="lib-toolbar">
+    <button class="btn" id="folder-btn" onclick="pickFolder()" disabled>📁 Open folder…</button>
+    <div class="folder-display empty" id="folder-display">No folder selected</div>
+    <div class="threshold-group">
+      <label>Threshold</label>
+      <input type="range" min="20" max="100" value="60" step="2" id="threshold" oninput="onThresholdChange()">
+      <span class="val" id="threshold-val">60</span>
+    </div>
+    <div class="threshold-group" title="Photos per magazine (front+back+colofon+index = 4)">
+      <label>Pages/mag</label>
+      <input type="range" min="1" max="8" value="4" step="1" id="pages-per-mag" oninput="onPagesPerMagChange()">
+      <span class="val" id="pages-per-mag-val">4</span>
+    </div>
+    <button class="btn primary" id="analyze-btn" onclick="runAnalysis()" disabled>▶ Analyze</button>
+    <button class="btn" id="reveal-btn" onclick="revealFolder()" disabled title="Open folder in file explorer">📂</button>
   </div>
-  <iframe id="report" style="display:none"></iframe>
+
+  <div class="lib-status" id="lib-status">
+    <span class="phase active" id="status-phase">STARTING</span>
+    <span id="status-text">Initializing webview…</span>
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    <span class="stats" id="status-stats"></span>
+  </div>
+
+  <div class="lib-content">
+    <div class="empty-state" id="empty-state">
+      <div class="icon">🗂️</div>
+      <h2>No analysis yet</h2>
+      <p>Pick a folder containing magazine photos, choose a match threshold, then click <strong>Analyze</strong>.</p>
+    </div>
+    <iframe id="report" style="display:none"></iframe>
+  </div>
 </div>
 
 <div class="toast" id="toast">
@@ -307,34 +683,18 @@ iframe {
 </div>
 
 <script>
-let currentFolder = null;
-let isAnalyzing = false;
+// ─── Mode switching ──────────────────────────────────────
+document.querySelectorAll('.mode-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.mode-tab').forEach(t => t.classList.toggle('active', t === tab));
+    const mode = tab.dataset.mode;
+    document.querySelectorAll('.mode-content').forEach(m => {
+      m.classList.toggle('active', m.id === `mode-${mode}`);
+    });
+  });
+});
 
-function setStatus(phase, text, progressPct = null) {
-  const phaseEl = document.getElementById('status-phase');
-  phaseEl.textContent = phase.toUpperCase();
-  phaseEl.className = 'phase';
-  if (phase === 'idle') phaseEl.classList.add('');
-  else if (phase === 'done') phaseEl.classList.add('done');
-  else phaseEl.classList.add('active');
-
-  document.getElementById('status-text').textContent = text;
-  if (progressPct !== null) {
-    document.getElementById('progress-fill').style.width = progressPct + '%';
-  }
-}
-
-function setStats(stats) {
-  if (!stats) {
-    document.getElementById('status-stats').innerHTML = '';
-    return;
-  }
-  document.getElementById('status-stats').innerHTML =
-    `<strong>${stats.total_images}</strong> photos · ` +
-    `<strong>${stats.total_groups}</strong> duplicates · ` +
-    `<strong>${stats.triple_plus}</strong> with 3+ copies`;
-}
-
+// ─── Toast ───────────────────────────────────────────────
 function showToast(title, body) {
   document.getElementById('toast-title').textContent = title;
   document.getElementById('toast-body').textContent = body;
@@ -342,25 +702,355 @@ function showToast(title, body) {
 }
 function hideToast() { document.getElementById('toast').classList.remove('visible'); }
 
-function onThresholdChange() {
-  document.getElementById('threshold-val').textContent = document.getElementById('threshold').value;
+// ─── Log ─────────────────────────────────────────────────
+function logMsg(text, cls = '') {
+  const log = document.getElementById('log');
+  const ts = new Date().toLocaleTimeString('en-GB');
+  const div = document.createElement('div');
+  div.className = `entry ${cls}`;
+  div.innerHTML = `<span class="ts">${ts}</span>${text}`;
+  log.insertBefore(div, log.firstChild);
+  // Keep last 200 entries
+  while (log.children.length > 200) log.removeChild(log.lastChild);
 }
+
+// ─── Shoot mode controls ─────────────────────────────────
+let tetherRunning = false;
+let libUrlBase = '';            // e.g. http://127.0.0.1:PORT/lib/
+let currentMagName = null;      // name of the magazine the thumb strip shows
+let thumbPhotos = [];           // [{name, late}] in arrival order
+
+async function loadTetherSettings() {
+  const s = await window.pywebview.api.get_tether_settings();
+  document.getElementById('cfg-watch').value = s.watch_dir || '';
+  document.getElementById('cfg-library').value = s.library_dir || '';
+  document.getElementById('cfg-duplicates').value = s.duplicates_dir || '';
+  document.getElementById('cfg-publication').value = s.publication || 'NME';
+  document.getElementById('cfg-hotkey').value = s.hotkey || '<alt>+n';
+  document.getElementById('cfg-auto-close').value = s.auto_close_seconds || 30;
+  document.getElementById('cfg-threshold').value = s.match_threshold || 60;
+  document.getElementById('cfg-grace').value = s.rotation_grace_seconds ?? 3;
+  document.getElementById('cfg-cover-check').checked = s.cover_check !== false;
+  document.getElementById('ac-sec').textContent = s.auto_close_seconds || 30;
+  document.getElementById('cur-hotkey').textContent = s.hotkey || '<alt>+n';
+}
+
+async function pickDir(kind) {
+  const folder = await window.pywebview.api.pick_tether_dir(kind);
+  if (folder) {
+    const id = {watch: 'cfg-watch', library: 'cfg-library', duplicates: 'cfg-duplicates'}[kind];
+    if (id) document.getElementById(id).value = folder;
+  }
+}
+
+function currentSettings() {
+  return {
+    watch_dir: document.getElementById('cfg-watch').value.trim(),
+    library_dir: document.getElementById('cfg-library').value.trim(),
+    duplicates_dir: document.getElementById('cfg-duplicates').value.trim(),
+    publication: document.getElementById('cfg-publication').value.trim() || 'NME',
+    hotkey: document.getElementById('cfg-hotkey').value.trim() || '<alt>+n',
+    auto_close_seconds: parseInt(document.getElementById('cfg-auto-close').value) || 30,
+    match_threshold: parseInt(document.getElementById('cfg-threshold').value) || 60,
+    rotation_grace_seconds: Math.max(0, parseInt(document.getElementById('cfg-grace').value) || 0),
+    cover_check: document.getElementById('cfg-cover-check').checked,
+  };
+}
+
+// ─── Hotkey recorder ─────────────────────────────────────
+// Clicking the hotkey field puts it into "listening" mode: the next keydown
+// with at least one modifier becomes the new hotkey, in pynput's syntax
+// (e.g. "<alt>+n", "<ctrl>+<shift>+f1").
+(function setupHotkeyRecorder() {
+  const input = document.getElementById('cfg-hotkey');
+  if (!input) return;
+
+  function keyToPynput(ev) {
+    const mods = [];
+    if (ev.ctrlKey)  mods.push('<ctrl>');
+    if (ev.altKey)   mods.push('<alt>');
+    if (ev.shiftKey) mods.push('<shift>');
+    if (ev.metaKey)  mods.push('<cmd>');
+    // Determine the main key, ignoring pure modifier presses.
+    const k = ev.key;
+    if (['Control','Alt','Shift','Meta','OS'].includes(k)) return null;
+    let main;
+    if (k === ' ') main = '<space>';
+    else if (k.length === 1) main = k.toLowerCase();
+    else if (/^F\d+$/.test(k)) main = `<${k.toLowerCase()}>`;
+    else if (k === 'Escape')    main = '<esc>';
+    else if (k === 'Enter')     main = '<enter>';
+    else if (k === 'Tab')       main = '<tab>';
+    else if (k === 'Backspace') main = '<backspace>';
+    else if (k === 'ArrowUp')   main = '<up>';
+    else if (k === 'ArrowDown') main = '<down>';
+    else if (k === 'ArrowLeft') main = '<left>';
+    else if (k === 'ArrowRight')main = '<right>';
+    else main = `<${k.toLowerCase()}>`;
+    return [...mods, main].join('+');
+  }
+
+  function startRecording() {
+    if (input.classList.contains('recording')) return;
+    const previous = input.value;
+    input.classList.add('recording');
+    input.value = 'Press keys…';
+
+    const onKey = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const combo = keyToPynput(ev);
+      if (!combo) return;       // pure modifier, keep listening
+      stopRecording(combo);
+    };
+    const onBlur = () => stopRecording(null);
+
+    function stopRecording(combo) {
+      input.removeEventListener('keydown', onKey, true);
+      input.removeEventListener('blur', onBlur, true);
+      input.classList.remove('recording');
+      const final = combo || previous;
+      input.value = final;
+      document.getElementById('cur-hotkey').textContent = final;
+    }
+
+    input.addEventListener('keydown', onKey, true);
+    input.addEventListener('blur', onBlur, true);
+    input.focus();
+  }
+
+  input.addEventListener('click', startRecording);
+  input.addEventListener('focus', startRecording);
+})();
+
+async function startTether() {
+  const settings = currentSettings();
+  if (!settings.watch_dir || !settings.library_dir) {
+    showToast('Setup required', 'Pick both a watch folder and a library folder first.');
+    return;
+  }
+  await window.pywebview.api.save_tether_settings(settings);
+  const res = await window.pywebview.api.start_tether(settings);
+  if (!res.success) { showToast('Could not start', res.error || 'Unknown error'); return; }
+  tetherRunning = true;
+  libUrlBase = res.lib_url_base || '';
+  setUiRunning(true);
+  document.getElementById('tether-status').textContent = 'watching';
+  document.getElementById('tether-dot').classList.add('running');
+  document.getElementById('cur-hotkey').textContent = settings.hotkey;
+  document.getElementById('ac-sec').textContent = settings.auto_close_seconds;
+  resetThumbStrip();
+  logMsg('▶ Started watching', 'event');
+}
+
+async function stopTether() {
+  await window.pywebview.api.stop_tether();
+  tetherRunning = false;
+  setUiRunning(false);
+  document.getElementById('tether-status').textContent = 'stopped';
+  document.getElementById('tether-dot').classList.remove('running');
+  document.getElementById('cur-mag').textContent = '—';
+  document.getElementById('cur-count').textContent = '0';
+  resetThumbStrip();
+  logMsg('■ Stopped', 'event');
+}
+
+// ─── Thumb strip (current magazine) ──────────────────────
+function resetThumbStrip() {
+  thumbPhotos = [];
+  currentMagName = null;
+  renderThumbStrip();
+}
+
+function renderThumbStrip() {
+  const strip = document.getElementById('thumb-strip');
+  const countEl = document.getElementById('thumb-strip-count');
+  strip.innerHTML = '';
+  if (!thumbPhotos.length) {
+    const e = document.createElement('div');
+    e.className = 'empty-thumbs';
+    e.textContent = currentMagName
+      ? `No photos in ${currentMagName} yet — take a shot.`
+      : 'No photos yet.';
+    strip.appendChild(e);
+    countEl.textContent = '';
+    return;
+  }
+  countEl.textContent = `${thumbPhotos.length} photo${thumbPhotos.length === 1 ? '' : 's'}`;
+  thumbPhotos.forEach((p, i) => {
+    const div = document.createElement('div');
+    div.className = 'thumb' + (p.late ? ' late' : '');
+    div.title = p.name + (p.late ? ' (routed to previous magazine — late EXIF)' : '');
+    if (libUrlBase && p.magazine) {
+      const u = `${libUrlBase}${encodeURIComponent(p.magazine)}/${encodeURIComponent(p.name)}`;
+      div.style.backgroundImage = `url("${u}")`;
+    }
+    const n = document.createElement('div');
+    n.className = 'thumb-num';
+    n.textContent = i + 1;
+    div.appendChild(n);
+    strip.appendChild(div);
+  });
+}
+
+function setUiRunning(on) {
+  document.getElementById('btn-start').disabled = on;
+  document.getElementById('btn-stop').disabled = !on;
+  document.getElementById('btn-new-mag').disabled = !on;
+  document.getElementById('btn-close-mag').disabled = !on;
+}
+
+async function manualNewMagazine() {
+  const r = await window.pywebview.api.tether_open_new_magazine();
+  if (!r.success) showToast('Failed', r.error || 'Unknown error');
+}
+async function manualCloseMagazine() {
+  const r = await window.pywebview.api.tether_close_magazine();
+  if (!r.success) showToast('Failed', r.error || 'Unknown error');
+}
+
+// ─── Verdict card ────────────────────────────────────────
+function setVerdict(kind, magName, info, chips) {
+  const card = document.getElementById('verdict-card');
+  card.className = 'verdict-card ' + (kind || 'idle').toLowerCase();
+  card.querySelector('.vbig').textContent = (
+    kind === 'UNIQUE'    ? '✓ UNIQUE' :
+    kind === 'DUPLICATE' ? '⚠ DUPLICATE' :
+    kind === 'UNCERTAIN' ? '? UNCERTAIN' : '—'
+  );
+  document.getElementById('verdict-mag').textContent = magName || '';
+  document.getElementById('verdict-info').innerHTML = info || '';
+  const chipsEl = document.getElementById('verdict-chips');
+  chipsEl.innerHTML = '';
+  (chips || []).forEach(c => {
+    const span = document.createElement('span');
+    span.className = 'vchip';
+    span.textContent = c;
+    chipsEl.appendChild(span);
+  });
+  const actEl = document.getElementById('verdict-actions');
+  actEl.innerHTML = '';
+  if ((kind === 'DUPLICATE' || kind === 'UNCERTAIN') && magName) {
+    const btn = document.createElement('button');
+    btn.className = 'btn danger';
+    btn.textContent = '→ Move to duplicates';
+    btn.title = 'Move this magazine out of the library so it stops matching future shoots.';
+    btn.onclick = () => moveToDuplicates(magName);
+    actEl.appendChild(btn);
+  }
+}
+
+async function moveToDuplicates(magName) {
+  if (!magName) return;
+  const r = await window.pywebview.api.tether_move_to_duplicates(magName);
+  if (!r || !r.success) {
+    showToast('Move failed', (r && r.error) || 'Unknown error');
+    return;
+  }
+  logMsg(`→ Moved ${magName} → ${r.moved_to}`, 'event');
+  // Disable the action button so it can't be clicked twice.
+  document.getElementById('verdict-actions').innerHTML = '';
+  // Add a chip so the verdict card shows it's been handled.
+  const chipsEl = document.getElementById('verdict-chips');
+  const chip = document.createElement('span');
+  chip.className = 'vchip';
+  chip.textContent = 'moved → duplicates';
+  chipsEl.appendChild(chip);
+}
+
+// ─── Tether event handler (called from Python) ──────────
+window.onTetherEvent = function(evt) {
+  if (!evt) return;
+  switch (evt.type) {
+    case 'started':
+      logMsg('Watcher started', 'event');
+      break;
+    case 'magazine_opened':
+      document.getElementById('cur-mag').textContent = evt.name;
+      document.getElementById('cur-count').textContent = '0';
+      currentMagName = evt.name;
+      thumbPhotos = [];
+      renderThumbStrip();
+      logMsg(`▶ New magazine: <b>${evt.name}</b>`, 'event');
+      break;
+    case 'photo_added':
+      // Only update the strip if the photo belongs to the magazine the
+      // strip is showing. Late-routed photos (going into the previous,
+      // draining magazine) are logged but don't appear in the current strip.
+      if (evt.magazine === currentMagName) {
+        thumbPhotos.push({name: evt.name, magazine: evt.magazine, late: !!evt.routed_late});
+        document.getElementById('cur-count').textContent = evt.count;
+        renderThumbStrip();
+      }
+      logMsg(`  + ${evt.name} → ${evt.magazine} (${evt.count})${evt.routed_late ? ' [late→prev]' : ''}`, '');
+      break;
+    case 'magazine_closed':
+      logMsg(`■ Closed ${evt.name} (${evt.photos} photos)`, 'event');
+      break;
+    case 'verdict': {
+      const m = evt.match || {};
+      let info = '';
+      let chips = [];
+      const scope = evt.cover_only ? 'front cover' : 'magazine';
+      if (evt.kind === 'UNIQUE') {
+        info = `<b>${evt.name}</b>'s ${scope} doesn't match anything in your library.`;
+      } else if (evt.kind === 'DUPLICATE') {
+        info = `<b>${evt.name}</b>'s ${scope} matches <span class="match-name">${m.name || '?'}</span>. Move it to the duplicates folder if you want to resell it.`;
+      } else if (evt.kind === 'UNCERTAIN') {
+        info = `<b>${evt.name}</b>'s ${scope} looks similar to <span class="match-name">${m.name || '?'}</span>. Verify visually.`;
+      }
+      if (evt.cover_only) chips.push('cover-only');
+      if (m.score !== undefined) chips.push(`distance ${m.score}`);
+      if (m.detail) {
+        if (m.detail.phash !== undefined) chips.push(`pHash ${m.detail.phash}`);
+        if (m.detail.dhash !== undefined) chips.push(`dHash ${m.detail.dhash}`);
+        if (m.detail.date_match) chips.push(`📅 date match`);
+      }
+      setVerdict(evt.kind, evt.name, info, chips);
+      logMsg(`◆ ${evt.kind}: ${evt.name}` + (m.name ? ` (match: ${m.name})` : ''), 'verdict');
+      break;
+    }
+    case 'info':
+      logMsg(`ⓘ ${evt.message}`, 'event');
+      break;
+    case 'error':
+      logMsg(`✗ ${evt.message}`, 'error');
+      break;
+    default:
+      console.log('Unknown tether event', evt);
+  }
+};
+
+// ─── Library mode (legacy) ───────────────────────────────
+let currentFolder = null;
+let isAnalyzing = false;
+
+function setStatus(phase, text, progressPct = null) {
+  const el = document.getElementById('status-phase');
+  el.textContent = phase.toUpperCase();
+  el.className = 'phase ' + (phase === 'done' ? 'done' : phase === 'idle' ? '' : 'active');
+  document.getElementById('status-text').textContent = text;
+  if (progressPct !== null) document.getElementById('progress-fill').style.width = progressPct + '%';
+}
+function setStats(stats) {
+  document.getElementById('status-stats').innerHTML = stats
+    ? `<strong>${stats.total_images}</strong> photos · <strong>${stats.total_groups}</strong> duplicates · <strong>${stats.triple_plus}</strong> with 3+ copies`
+    : '';
+}
+function onThresholdChange() { document.getElementById('threshold-val').textContent = document.getElementById('threshold').value; }
+function onPagesPerMagChange() { document.getElementById('pages-per-mag-val').textContent = document.getElementById('pages-per-mag').value; }
 
 async function pickFolder() {
   if (isAnalyzing) return;
-  try {
-    const folder = await window.pywebview.api.pick_folder();
-    if (folder) {
-      currentFolder = folder;
-      const disp = document.getElementById('folder-display');
-      disp.textContent = folder;
-      disp.classList.remove('empty');
-      document.getElementById('analyze-btn').disabled = false;
-      document.getElementById('reveal-btn').disabled = false;
-      setStatus('ready', 'Folder selected. Click Analyze to run.');
-    }
-  } catch (e) {
-    showToast('Folder picker failed', e.message || String(e));
+  const folder = await window.pywebview.api.pick_folder();
+  if (folder) {
+    currentFolder = folder;
+    const disp = document.getElementById('folder-display');
+    disp.textContent = folder;
+    disp.classList.remove('empty');
+    document.getElementById('analyze-btn').disabled = false;
+    document.getElementById('reveal-btn').disabled = false;
+    setStatus('ready', 'Folder selected. Click Analyze to run.');
   }
 }
 
@@ -371,17 +1061,15 @@ async function runAnalysis() {
   document.getElementById('progress-fill').style.width = '0%';
   setStats(null);
   setStatus('starting', 'Starting analysis…', 0);
-
   const threshold = parseInt(document.getElementById('threshold').value);
-
+  const pagesPerMag = parseInt(document.getElementById('pages-per-mag').value);
   try {
-    const result = await window.pywebview.api.analyze(currentFolder, threshold);
+    const result = await window.pywebview.api.analyze(currentFolder, threshold, pagesPerMag);
     if (result.success) {
-      setStatus('done', `Done — report ready.`, 100);
+      setStatus('done', 'Done — report ready.', 100);
       setStats(result.stats);
-      // Show the iframe with the generated report
       const iframe = document.getElementById('report');
-      iframe.src = result.report_url + '?t=' + Date.now(); // bust cache
+      iframe.src = result.report_url + '?t=' + Date.now();
       iframe.style.display = 'block';
       document.getElementById('empty-state').style.display = 'none';
     } else {
@@ -399,30 +1087,36 @@ async function runAnalysis() {
 
 async function revealFolder() {
   if (!currentFolder) return;
-  try {
-    await window.pywebview.api.open_in_explorer(currentFolder);
-  } catch (e) {
-    showToast('Could not open folder', e.message || String(e));
-  }
+  try { await window.pywebview.api.open_in_explorer(currentFolder); } catch (e) {}
 }
 
-// Called by Python during analysis to update progress
-window.onProgress = function (n, total, phase) {
-  const phaseLabels = {
-    scan:   'Scanning files…',
-    hash:   `Hashing images (${n} / ${total})`,
-    match:  'Finding duplicate matches…',
-    render: 'Generating report…',
-  };
-  const text = phaseLabels[phase] || `${phase}: ${n}/${total}`;
-  const pct = (phase === 'hash' && total > 0) ? Math.round((n / total) * 100) : null;
-  setStatus(phase, text, pct);
+window.onProgress = function(n, total, phase) {
+  const labels = { scan: 'Scanning files…', crop: `Cropping (${n}/${total})`,
+                   hash: `Hashing & OCR (${n}/${total})`,
+                   match: 'Finding duplicates…', render: 'Generating report…' };
+  const pct = (total > 0 && (phase === 'hash' || phase === 'crop')) ? Math.round(n / total * 100) : null;
+  setStatus(phase, labels[phase] || `${phase}: ${n}/${total}`, pct);
 };
 
-// Wait for pywebview API to be ready
-window.addEventListener('pywebviewready', () => {
-  setStatus('idle', 'Pick a folder to begin.');
-});
+// ─── pywebview readiness ─────────────────────────────────
+function enableUIWhenReady() {
+  if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.pick_folder === 'function') {
+    document.getElementById('folder-btn').disabled = false;
+    setStatus('idle', 'Pick a folder to begin.');
+    loadTetherSettings().catch(() => {});
+    return true;
+  }
+  return false;
+}
+window.addEventListener('pywebviewready', () => enableUIWhenReady());
+let readyAttempts = 0;
+const readyPoll = setInterval(() => {
+  readyAttempts++;
+  if (enableUIWhenReady() || readyAttempts > 100) {
+    clearInterval(readyPoll);
+    if (readyAttempts > 100) setStatus('idle', 'Webview API failed to initialize. Try restarting the app.');
+  }
+}, 100);
 </script>
 </body>
 </html>
