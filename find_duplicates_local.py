@@ -19,12 +19,15 @@ Walks subfolders, so images organized by collection
 """
 
 import json
+import logging
 import re
 import sys
 import argparse
 import time
 from pathlib import Path
 from collections import defaultdict
+
+_LOGGER = logging.getLogger(__name__)
 
 # Force unbuffered output so progress prints visibly during long runs
 # Also force UTF-8 so unicode characters in the report don't crash on Windows
@@ -75,6 +78,31 @@ except ImportError:
 
 def cropping_available() -> bool:
     return _CV2_AVAILABLE
+
+
+# ─── rembg foreground segmentation (optional) ───────────────────────────────
+# U^2-Net based foreground segmentation. Used as the primary magazine-detector
+# in crop_magazine, with the OpenCV contour-based detector as fallback. Heavy
+# (~176MB model + onnxruntime); import-guarded so it stays optional.
+try:
+    from rembg import new_session as _rembg_new_session
+    from rembg import remove as _rembg_remove
+    _REMBG_AVAILABLE = True
+except ImportError:
+    _REMBG_AVAILABLE = False
+
+_REMBG_SESSION = None
+
+
+def _get_rembg_session():
+    global _REMBG_SESSION
+    if _REMBG_SESSION is None and _REMBG_AVAILABLE:
+        _REMBG_SESSION = _rembg_new_session("u2net")
+    return _REMBG_SESSION
+
+
+def rembg_available() -> bool:
+    return _REMBG_AVAILABLE
 
 
 def _order_quad(pts):
@@ -142,6 +170,95 @@ def _find_magazine_quad(img_bgr):
     return _cv2.boxPoints(rect).astype(_np.float32)
 
 
+def _find_magazine_quad_rembg(img_bgr):
+    """Return 4 corner points of the magazine using U^2-Net foreground
+    segmentation, or None if no plausible quad was found.
+
+    Used as the primary detector in `crop_magazine` because rembg handles
+    complex/textured backgrounds and bound-book scenes that the corner-median
+    threshold in `_find_magazine_quad` can't separate. Returns None on any
+    rejection so the caller can fall back to `_find_magazine_quad`.
+    """
+    if not _REMBG_AVAILABLE or not _CV2_AVAILABLE:
+        return None
+    import numpy as _np
+    h, w = img_bgr.shape[:2]
+
+    # rembg expects RGB PIL input.
+    rgb = _cv2.cvtColor(img_bgr, _cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(rgb)
+
+    try:
+        mask_pil = _rembg_remove(
+            pil_img, session=_get_rembg_session(), only_mask=True
+        )
+    except Exception as exc:
+        # Corrupt input, OOM, missing model on first-run with no network, etc.
+        _LOGGER.warning("rembg.remove failed: %s", exc)
+        return None
+
+    mask = _np.asarray(mask_pil, dtype=_np.uint8)
+    if mask.ndim == 3:
+        mask = mask[..., 0]
+    _, mask = _cv2.threshold(mask, 128, 255, _cv2.THRESH_BINARY)
+
+    # Same close-kernel size as the OpenCV detector for consistency: bridges
+    # small holes (text gutters, magazine fold) so the page becomes one blob.
+    k = max(15, min(h, w) // 100)
+    kernel = _cv2.getStructuringElement(_cv2.MORPH_RECT, (k, k))
+    mask = _cv2.morphologyEx(mask, _cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    contours, _ = _cv2.findContours(mask, _cv2.RETR_EXTERNAL, _cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+    largest = max(contours, key=_cv2.contourArea)
+    frame_area = float(h * w)
+    area = float(_cv2.contourArea(largest))
+
+    # Too small → rembg found nothing plausible. Typically means the input
+    # is already cropped (no clear foreground/background contrast) or the
+    # subject is genuinely tiny — either way fall back to the OpenCV detector.
+    if area < 0.15 * frame_area:
+        return None
+    # Too large → whole-frame mask. rembg sometimes does this on
+    # already-cropped inputs or when foreground/background are inseparable.
+    # An accepted near-full quad would defeat the purpose of cropping.
+    if area > 0.97 * frame_area:
+        return None
+
+    peri = _cv2.arcLength(largest, True)
+    quad = None
+    for eps in (0.02, 0.03, 0.05, 0.08):
+        approx = _cv2.approxPolyDP(largest, eps * peri, True)
+        if len(approx) == 4:
+            quad = approx.reshape(4, 2).astype(_np.float32)
+            break
+    if quad is None:
+        rect = _cv2.minAreaRect(largest)
+        quad = _cv2.boxPoints(rect).astype(_np.float32)
+
+    # Validate quad shape: reject if opposite sides differ by more than 40%
+    # in length. Extreme skew usually means rembg latched onto a weird blob
+    # (eg. a dark photographer-hand fragment) rather than the page.
+    ordered = _order_quad(quad)
+    tl, tr, br, bl = ordered
+    top = float(_np.linalg.norm(tr - tl))
+    bottom = float(_np.linalg.norm(br - bl))
+    left = float(_np.linalg.norm(bl - tl))
+    right = float(_np.linalg.norm(br - tr))
+
+    def _too_uneven(a: float, b: float) -> bool:
+        m = max(a, b)
+        if m <= 0:
+            return True
+        return abs(a - b) / m > 0.40
+
+    if _too_uneven(top, bottom) or _too_uneven(left, right):
+        return None
+
+    return quad
+
+
 def crop_magazine(src_path, dst_path) -> tuple[int, int] | None:
     """Detect the magazine in `src_path`, perspective-warp it onto a clean
     rectangle, and save to `dst_path` as JPEG. Returns (width, height) of the
@@ -152,7 +269,19 @@ def crop_magazine(src_path, dst_path) -> tuple[int, int] | None:
     img = _cv2.imread(str(src_path))
     if img is None:
         return None
-    quad = _find_magazine_quad(img)
+    quad = None
+    method_used = None
+    if rembg_available():
+        quad = _find_magazine_quad_rembg(img)
+        if quad is not None:
+            method_used = "rembg"
+    if quad is None:
+        quad = _find_magazine_quad(img)
+        if quad is not None:
+            method_used = "opencv"
+    _LOGGER.info(
+        "crop %s: method=%s", Path(src_path).name, method_used or "none"
+    )
     if quad is None:
         return None
     quad = _order_quad(quad)

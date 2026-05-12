@@ -534,5 +534,142 @@ tesseract bundled. Run that .exe directly.
 runs reuse `phash_cache.json` and complete in seconds.
 
 
+---
 
+## Session 5 (2026-05-12) — rembg as primary magazine detector
 
+### Problem
+
+`_find_magazine_quad` has a single corner-median-threshold path: it samples
+the four image corners, takes the background grey level, and accepts any
+contiguous darker blob as the magazine. This works on neutral photo-studio
+backgrounds and on bound books with saturated dark corners, but fails on:
+
+1. **Complex backgrounds** — table or floor with brightness close to the
+   paper. Threshold yields a fragmented mask; the largest blob is no longer
+   the page.
+2. **Already-cropped inputs** — no detectable page edge at all. The detector
+   either grabs a tiny speck (rejected) or the whole frame (accepted with
+   the page already inside, harmless) or, worst case, a corner artifact.
+3. **Whole-frame false positives** — when the page touches all four edges
+   (bound book filling the frame), the "quad" snaps to the image border and
+   the warp becomes a near-identity. The crop ends up no better than the
+   input.
+
+### Approach
+
+Add `rembg` (U^2-Net) as the **primary** detector and keep
+`_find_magazine_quad` as fallback. The decision lives entirely inside
+`crop_magazine`; the function signature (`(src_path, dst_path) -> (w, h) |
+None`) is unchanged, so `tether.py` and every other caller is untouched.
+
+Two-tier flow in `crop_magazine`:
+1. If rembg is available, try `_find_magazine_quad_rembg`.
+2. If it returns None, fall back to `_find_magazine_quad`.
+3. If both fail, return None (caller treats as "skip cropping" as before).
+
+`_find_magazine_quad_rembg` rejects a quad (returns None, triggering the
+fallback) when:
+- Largest contour < 15% of frame → rembg found nothing plausible.
+- Largest contour > 97% of frame → whole-frame mask; defeats cropping.
+- Opposite sides differ by more than 40% in length → unrealistically skewed
+  blob, likely a rembg artefact (eg. a dark photographer-hand fragment).
+
+All `rembg.remove` exceptions are caught and logged; the function returns
+None on failure, so a rembg crash never propagates to the worker thread.
+
+### Trade-offs
+
+- **Latency:** rembg on CPU is ~2-3 sec per photo (vs ~0.3 sec for the
+  contour detector). Acceptable for the live tether because `tether.py`
+  already runs `crop_magazine` on a worker thread — the user can take the
+  next shot while the previous one is being cropped.
+- **First-run download:** rembg fetches the U^2-Net weights (~176 MB) into
+  `~/.u2net/` on the first call. No network → no model → `rembg.remove`
+  raises → we log a warning and fall back to the OpenCV detector.
+- **.exe build implication:** `build.ps1` is **not** updated this session,
+  but it will need to either (a) bundle `u2net.onnx` next to the executable
+  and set `U2NET_HOME` at startup, or (b) accept that the first run on a
+  fresh machine requires internet. Worth deciding before the next release
+  build — flagged for follow-up.
+- **Dependency weight:** rembg pulls in `onnxruntime` and a handful of
+  smaller deps. Pinned at `rembg==2.0.75` in `requirements.txt` for
+  reproducibility.
+
+### Validation tooling
+
+New script `test_cropping.py` runs both detectors on a folder of test
+photos and writes, per input:
+- `<stem>_rembg_quad.jpg` — original (downscaled to 1200 px) with the rembg
+  quad drawn as a green polyline + red corner dots.
+- `<stem>_opencv_quad.jpg` — same for the OpenCV detector.
+- `<stem>_rembg_crop.jpg` — full `crop_magazine` output when only the rembg
+  detector is allowed (forced via monkeypatch of `_find_magazine_quad`).
+- `<stem>_opencv_crop.jpg` — full `crop_magazine` output with rembg
+  disabled (forced via `fdl._REMBG_AVAILABLE = False`).
+
+Summary at the end counts successes per detector and flags photos where
+rembg likely beat OpenCV (heuristic: rembg quad area < 70 % of OpenCV quad
+area, *or* rembg succeeded while OpenCV failed).
+
+Default input folder is `./_demo_test_photos` (already present in this
+branch as `e90b7ed`).
+
+### First validation run (7 photos in `_demo_test_photos/`)
+
+```
+rembg quad detected    : 7/7
+opencv quad detected   : 7/7
+rembg crop_magazine OK : 7/7
+opencv crop_magazine OK: 7/7
+
+Per-photo verdict (rembg vs opencv quad alignment):
+  2026_05_07_NME_0001.JPG   tie (+2px)
+  2026_05_07_NME_0002.JPG   tie (+2px)
+  2026_05_07_NME_0003.JPG   rembg tighter (+49px)
+  2026_05_07_NME_0004.JPG   tie (+2px)
+  2026_05_07_NME_0005.JPG   tie (+1px)
+  2026_05_12_MM_0085.JPG    rembg tighter (+25px)
+  2026_05_12_MM_0086.JPG    rembg tighter (+32px)
+
+Verdict summary: rembg tighter=3, tie=4, opencv tighter=0
+```
+
+The two MM (Melody Maker) photos are bound-book spreads where the dark
+leather binding sits at the left edge. The OpenCV detector pulled its
+left edge into the binding (because it's darker than the background and
+passes the corner-median threshold). Rembg cut along the actual page
+edge, excluding the binding from the warped output. Visual inspection of
+`_test_results/*_opencv_quad.jpg` vs `*_rembg_quad.jpg` confirms the
+verdict. On the five flat NME photos (single-page on a neutral
+background — the easy case), the two detectors agree to within 1-2 px,
+which the threshold correctly calls a tie.
+
+The verdict uses an empirical 20 px threshold on **signed average inward
+displacement** of each rembg corner relative to its opencv counterpart
+— picked because the noise floor on visually-identical detections sits
+around 1-2 px, while a single-side bleed (e.g. opencv including the
+binding on the left only) averages 25-50 px across all four corners.
+
+No opencv-tighter results in this set; rembg never over-cropped past
+the page edge.
+
+### Code not touched
+
+- `tether.py`, `app.py`, `migrate.py`, `test_accuracy.py`, `app_index.html`,
+  `build.ps1`, `DuplicateFinder.spec`, `make_icon.py` — all unchanged.
+- `_order_quad` — unchanged.
+- `crop_magazine`'s warp/output logic (`getPerspectiveTransform`,
+  `warpPerspective`, `imwrite`) is unchanged; only the quad-selection step
+  was rewritten.
+- Cache schema stays at v5 (cache contents are derived from the cropped
+  files; changing the cropper does not invalidate the cache format).
+
+### Files changed this session
+
+- `requirements.txt` — added `rembg==2.0.75`.
+- `find_duplicates_local.py` — added module-level `_LOGGER`, rembg
+  availability block, `_find_magazine_quad_rembg`, and a two-tier detector
+  selection inside `crop_magazine`.
+- `test_cropping.py` — NEW, side-by-side comparison harness.
+- `WORKLOG.md` — this section.

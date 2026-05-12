@@ -1,3 +1,4 @@
 pywebview>=5.0
 pillow>=10.0
 imagehash>=4.3
+rembg==2.0.75
