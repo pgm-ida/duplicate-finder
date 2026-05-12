@@ -83,8 +83,11 @@ def cropping_available() -> bool:
 
 # ─── rembg foreground segmentation (optional) ───────────────────────────────
 # U^2-Net based foreground segmentation. Used as the primary magazine-detector
-# in crop_magazine, with the OpenCV contour-based detector as fallback. Heavy
-# (~176MB model + onnxruntime); import-guarded so it stays optional.
+# in crop_magazine, with the OpenCV contour-based detector as fallback. The
+# actual `from rembg import ...` is deferred to first use — importing rembg
+# pulls in onnxruntime + scipy + numba and adds ~60 seconds to .exe startup
+# on cold disk. With lazy import, startup is fast and the first crop pays
+# the init cost on the tether worker thread (where the user doesn't notice).
 #
 # When running from a PyInstaller bundle (`sys.frozen`), point U2NET_HOME at
 # the embedded model directory so rembg doesn't try to download weights on
@@ -94,25 +97,39 @@ if getattr(sys, "frozen", False):
     if _bundled_u2net.is_dir():
         os.environ.setdefault("U2NET_HOME", str(_bundled_u2net))
 
-try:
-    from rembg import new_session as _rembg_new_session
-    from rembg import remove as _rembg_remove
-    _REMBG_AVAILABLE = True
-except ImportError:
-    _REMBG_AVAILABLE = False
-
+_REMBG_AVAILABLE: "bool | None" = None  # None = not yet probed
+_rembg_new_session = None  # populated on first successful probe
+_rembg_remove = None
 _REMBG_SESSION = None
+
+
+def rembg_available() -> bool:
+    """Returns True if rembg can be imported. Caches the result of the first
+    probe — the actual import only happens on the first call."""
+    global _REMBG_AVAILABLE, _rembg_new_session, _rembg_remove
+    if _REMBG_AVAILABLE is not None:
+        return _REMBG_AVAILABLE
+    try:
+        from rembg import new_session as _ns
+        from rembg import remove as _rm
+        _rembg_new_session = _ns
+        _rembg_remove = _rm
+        _REMBG_AVAILABLE = True
+    except Exception as exc:
+        # Broader than ImportError on purpose: rembg's onnxruntime backend can
+        # raise OSError/RuntimeError or metadata-lookup errors in a frozen
+        # .exe. Treat any failure as "not available" so the app falls back
+        # to the OpenCV cropper instead of crashing.
+        _LOGGER.warning("rembg import failed: %s", exc)
+        _REMBG_AVAILABLE = False
+    return _REMBG_AVAILABLE
 
 
 def _get_rembg_session():
     global _REMBG_SESSION
-    if _REMBG_SESSION is None and _REMBG_AVAILABLE:
+    if _REMBG_SESSION is None and rembg_available():
         _REMBG_SESSION = _rembg_new_session("u2net")
     return _REMBG_SESSION
-
-
-def rembg_available() -> bool:
-    return _REMBG_AVAILABLE
 
 
 def _order_quad(pts):
@@ -189,7 +206,7 @@ def _find_magazine_quad_rembg(img_bgr):
     threshold in `_find_magazine_quad` can't separate. Returns None on any
     rejection so the caller can fall back to `_find_magazine_quad`.
     """
-    if not _REMBG_AVAILABLE or not _CV2_AVAILABLE:
+    if not _CV2_AVAILABLE or not rembg_available():
         return None
     import numpy as _np
     h, w = img_bgr.shape[:2]
