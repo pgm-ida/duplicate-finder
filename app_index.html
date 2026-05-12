@@ -137,11 +137,18 @@ input:focus { border-color: var(--accent); }
   overflow: hidden;
 }
 .shoot-side {
-  width: 360px;
-  padding: 18px 20px;
+  width: 320px;
+  padding: 14px 16px;
   border-right: 1px solid var(--border);
   overflow-y: auto;
   flex-shrink: 0;
+  transition: width 0.18s ease, padding 0.18s ease;
+}
+.shoot-side.collapsed {
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+  border-right: none;
 }
 .shoot-main {
   flex: 1;
@@ -196,14 +203,38 @@ input:focus { border-color: var(--accent); }
 
 /* Status panel — center-stage */
 .status-strip {
-  padding: 10px 24px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
   background: var(--bg-card);
   flex-shrink: 0;
   font-size: 12px;
+  flex-wrap: wrap;
+}
+.icon-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.icon-btn:hover { color: var(--text); border-color: var(--border-strong); }
+.status-strip .field.mag {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .status-dot {
   width: 10px;
@@ -219,9 +250,9 @@ input:focus { border-color: var(--accent); }
 
 /* The big card for the most recent verdict */
 .verdict-card {
-  margin: 24px;
-  padding: 32px;
-  border-radius: 14px;
+  margin: 14px;
+  padding: 18px 16px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg-card);
   display: flex;
@@ -250,10 +281,10 @@ input:focus { border-color: var(--accent); }
   100% { transform: scale(1); }
 }
 .verdict-card .vbig {
-  font-size: 40px;
+  font-size: 26px;
   font-weight: 700;
-  letter-spacing: -1px;
-  margin: 4px 0 8px;
+  letter-spacing: -0.5px;
+  margin: 2px 0 4px;
 }
 .verdict-card.unique .vbig { color: var(--keep); }
 .verdict-card.duplicate .vbig { color: var(--remove); }
@@ -266,16 +297,17 @@ input:focus { border-color: var(--accent); }
   font-weight: 600;
 }
 .verdict-card .vmag {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text);
-  margin-bottom: 14px;
+  margin-bottom: 8px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  word-break: break-all;
 }
 .verdict-card .vinfo {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-dim);
-  max-width: 600px;
-  line-height: 1.6;
+  line-height: 1.5;
 }
 .verdict-card .vinfo .match-name {
   color: var(--text);
@@ -593,24 +625,15 @@ iframe { width: 100%; height: 100%; border: 0; background: var(--bg); }
         <button class="btn" id="btn-close-mag" onclick="manualCloseMagazine()" disabled>✓ Close & check</button>
       </div>
 
-      <div class="cfg">
-        <h3>How it works</h3>
-        <div class="hint" style="margin-top: 0; line-height: 1.6">
-          1. Press <kbd>Alt+N</kbd> (or click <b>New magazine</b>) before shooting each magazine.<br>
-          2. EOS Utility saves photos into <i>Watch</i> as usual.<br>
-          3. Each photo gets auto-cropped &amp; moved into the current magazine folder.<br>
-          4. After <span id="ac-sec">30</span>s of no new photos (or next press of <kbd>Alt+N</kbd>), the magazine closes and is compared against your library. You get an instant verdict.
-        </div>
-      </div>
+      <span id="ac-sec" style="display:none">30</span>
     </aside>
 
     <section class="shoot-main">
       <div class="status-strip">
+        <button class="icon-btn" id="btn-toggle-side" onclick="toggleSidebar()" title="Toggle settings panel">⚙</button>
         <span class="status-dot" id="tether-dot"></span>
-        <span class="field">Status: <strong id="tether-status">stopped</strong></span>
-        <span class="field">Magazine: <strong id="cur-mag">—</strong></span>
-        <span class="field">Photos: <strong id="cur-count">0</strong></span>
-        <span class="field" style="margin-left:auto">Hotkey: <strong id="cur-hotkey">—</strong></span>
+        <span class="field mag"><strong id="cur-mag">stopped</strong> · <span id="cur-count">0</span></span>
+        <span style="display:none" id="cur-hotkey"></span>
       </div>
 
       <div class="thumb-strip-wrap">
@@ -624,10 +647,9 @@ iframe { width: 100%; height: 100%; border: 0; background: var(--bg); }
       </div>
 
       <div class="verdict-card idle" id="verdict-card">
-        <div class="vlabel">Latest verdict</div>
         <div class="vbig">—</div>
         <div class="vmag" id="verdict-mag"></div>
-        <div class="vinfo" id="verdict-info">Press <kbd>Alt+N</kbd> to open the first magazine. Photos arriving in the watch folder will be cropped and added automatically.</div>
+        <div class="vinfo" id="verdict-info">Press hotkey to open a magazine.</div>
         <div class="vchips" id="verdict-chips"></div>
         <div class="vactions" id="verdict-actions"></div>
       </div>
@@ -835,24 +857,32 @@ async function startTether() {
   tetherRunning = true;
   libUrlBase = res.lib_url_base || '';
   setUiRunning(true);
-  document.getElementById('tether-status').textContent = 'watching';
+  document.getElementById('cur-mag').textContent = 'watching';
   document.getElementById('tether-dot').classList.add('running');
   document.getElementById('cur-hotkey').textContent = settings.hotkey;
   document.getElementById('ac-sec').textContent = settings.auto_close_seconds;
   resetThumbStrip();
-  logMsg('▶ Started watching', 'event');
+  collapseSidebar(true);
+  logMsg(`▶ Watching — press ${settings.hotkey} for new magazine`, 'event');
 }
 
 async function stopTether() {
   await window.pywebview.api.stop_tether();
   tetherRunning = false;
   setUiRunning(false);
-  document.getElementById('tether-status').textContent = 'stopped';
   document.getElementById('tether-dot').classList.remove('running');
-  document.getElementById('cur-mag').textContent = '—';
+  document.getElementById('cur-mag').textContent = 'stopped';
   document.getElementById('cur-count').textContent = '0';
   resetThumbStrip();
+  collapseSidebar(false);
   logMsg('■ Stopped', 'event');
+}
+
+function collapseSidebar(collapse) {
+  document.querySelector('.shoot-side').classList.toggle('collapsed', collapse);
+}
+function toggleSidebar() {
+  document.querySelector('.shoot-side').classList.toggle('collapsed');
 }
 
 // ─── Thumb strip (current magazine) ──────────────────────
@@ -991,13 +1021,12 @@ window.onTetherEvent = function(evt) {
       const m = evt.match || {};
       let info = '';
       let chips = [];
-      const scope = evt.cover_only ? 'front cover' : 'magazine';
       if (evt.kind === 'UNIQUE') {
-        info = `<b>${evt.name}</b>'s ${scope} doesn't match anything in your library.`;
+        info = `No match in library.`;
       } else if (evt.kind === 'DUPLICATE') {
-        info = `<b>${evt.name}</b>'s ${scope} matches <span class="match-name">${m.name || '?'}</span>. Move it to the duplicates folder if you want to resell it.`;
+        info = `Matches <span class="match-name">${m.name || '?'}</span>`;
       } else if (evt.kind === 'UNCERTAIN') {
-        info = `<b>${evt.name}</b>'s ${scope} looks similar to <span class="match-name">${m.name || '?'}</span>. Verify visually.`;
+        info = `Similar to <span class="match-name">${m.name || '?'}</span> — verify visually.`;
       }
       if (evt.cover_only) chips.push('cover-only');
       if (m.score !== undefined) chips.push(`distance ${m.score}`);
