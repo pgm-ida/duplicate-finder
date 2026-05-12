@@ -587,11 +587,15 @@ None on failure, so a rembg crash never propagates to the worker thread.
 - **First-run download:** rembg fetches the U^2-Net weights (~176 MB) into
   `~/.u2net/` on the first call. No network → no model → `rembg.remove`
   raises → we log a warning and fall back to the OpenCV detector.
-- **.exe build implication:** `build.ps1` is **not** updated this session,
-  but it will need to either (a) bundle `u2net.onnx` next to the executable
-  and set `U2NET_HOME` at startup, or (b) accept that the first run on a
-  fresh machine requires internet. Worth deciding before the next release
-  build — flagged for follow-up.
+- **.exe build:** `build.ps1` now stages `u2net.onnx` (from
+  `~/.u2net/u2net.onnx`, downloaded on first rembg use) into
+  `_rembg_bundle/` and bundles it via `--add-data` alongside the tesseract
+  bundle. At runtime, the rembg block in `find_duplicates_local.py` sets
+  `U2NET_HOME` to the unpacked bundle directory when `sys.frozen` is true,
+  so the .exe uses the embedded model and never hits the network. Also
+  added `--collect-all` and `--hidden-import` entries for `rembg` and
+  `onnxruntime`. Expected .exe size growth: ~180 MB (model) + onnxruntime
+  binaries.
 - **Dependency weight:** rembg pulls in `onnxruntime` and a handful of
   smaller deps. Pinned at `rembg==2.0.75` in `requirements.txt` for
   reproducibility.
@@ -657,7 +661,8 @@ the page edge.
 ### Code not touched
 
 - `tether.py`, `app.py`, `migrate.py`, `test_accuracy.py`, `app_index.html`,
-  `build.ps1`, `DuplicateFinder.spec`, `make_icon.py` — all unchanged.
+  `DuplicateFinder.spec`, `make_icon.py` — all unchanged. (`build.ps1` was
+  updated for u2net bundling; see ".exe build" trade-off above.)
 - `_order_quad` — unchanged.
 - `crop_magazine`'s warp/output logic (`getPerspectiveTransform`,
   `warpPerspective`, `imwrite`) is unchanged; only the quad-selection step
@@ -668,8 +673,31 @@ the page edge.
 ### Files changed this session
 
 - `requirements.txt` — added `rembg==2.0.75`.
-- `find_duplicates_local.py` — added module-level `_LOGGER`, rembg
-  availability block, `_find_magazine_quad_rembg`, and a two-tier detector
-  selection inside `crop_magazine`.
+- `find_duplicates_local.py` — added module-level `_LOGGER`, `os`/`sys`
+  bundle-detection that sets `U2NET_HOME` when frozen, rembg availability
+  block, `_find_magazine_quad_rembg`, and a two-tier detector selection
+  inside `crop_magazine`.
 - `test_cropping.py` — NEW, side-by-side comparison harness.
+- `build.ps1` — stage `u2net.onnx` into `_rembg_bundle/` and bundle via
+  `--add-data`; added `--collect-all`/`--hidden-import` for `rembg` and
+  `onnxruntime`.
+- `.gitignore` — added `_rembg_bundle/` and `_smoke_test/`.
 - `WORKLOG.md` — this section.
+
+### End-to-end smoke test (post-bundle config)
+
+Re-ran `analyze_folder("_smoke_test")` (the function called by the desktop
+app and the live tether — not the CLI's `main()`, which bypasses cropping)
+on a fresh copy of the 7 demo photos:
+
+- All 7 photos cropped via rembg (each logged as `crop … method=rembg`).
+- `<folder>/cropped/` populated; cropped sizes match
+  `test_cropping.py`'s rembg-crop output byte-for-byte.
+- Features computed off the cropped versions; v5 cache written.
+- `find_duplicate_groups` ran without error and reported 0 groups (the 7
+  demo photos are distinct issues, so 0 duplicates is the correct result).
+- HTML + text report generated.
+
+This confirms the crop → hash → match → group pipeline is unbroken by the
+rembg integration and that bundle-time configuration (`U2NET_HOME` setup
+in the dev-mode no-op branch) doesn't interfere with regular use.

@@ -20,6 +20,7 @@ Walks subfolders, so images organized by collection
 
 import json
 import logging
+import os
 import re
 import sys
 import argparse
@@ -84,6 +85,15 @@ def cropping_available() -> bool:
 # U^2-Net based foreground segmentation. Used as the primary magazine-detector
 # in crop_magazine, with the OpenCV contour-based detector as fallback. Heavy
 # (~176MB model + onnxruntime); import-guarded so it stays optional.
+#
+# When running from a PyInstaller bundle (`sys.frozen`), point U2NET_HOME at
+# the embedded model directory so rembg doesn't try to download weights on
+# first launch. build.ps1 stages `u2net.onnx` into `<bundle>/u2net/`.
+if getattr(sys, "frozen", False):
+    _bundled_u2net = Path(getattr(sys, "_MEIPASS", "")) / "u2net"
+    if _bundled_u2net.is_dir():
+        os.environ.setdefault("U2NET_HOME", str(_bundled_u2net))
+
 try:
     from rembg import new_session as _rembg_new_session
     from rembg import remove as _rembg_remove

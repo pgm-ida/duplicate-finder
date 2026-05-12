@@ -1,9 +1,13 @@
 #!/usr/bin/env pwsh
-# Build the DuplicateFinder .exe with tesseract OCR bundled.
+# Build the DuplicateFinder .exe with tesseract OCR + rembg u2net bundled.
 #
 # Tesseract is staged into ./_tesseract_bundle then bundled into the .exe via
 # PyInstaller's --add-data. The app.py launcher detects sys._MEIPASS and points
 # pytesseract at the bundled binary at runtime.
+#
+# rembg's u2net.onnx weights are staged into ./_rembg_bundle. At runtime,
+# find_duplicates_local.py sets U2NET_HOME to the bundled path when frozen so
+# rembg uses the embedded model instead of downloading ~176 MB on first launch.
 
 $ErrorActionPreference = "Stop"
 
@@ -36,6 +40,24 @@ Copy-Item "$tessSrc\tessdata\eng.traineddata" "$stage\tessdata\"
 $staged_size = (Get-ChildItem $stage -Recurse | Measure-Object Length -Sum).Sum / 1MB
 Write-Host ("Bundle staged: {0:N1} MB" -f $staged_size)
 
+# Stage rembg's u2net.onnx weights. The model is downloaded by rembg on first
+# use into $env:USERPROFILE\.u2net\u2net.onnx (~176 MB). Bundling it avoids a
+# first-run network dependency in the .exe.
+$rembgSrc = "$env:USERPROFILE\.u2net\u2net.onnx"
+if (-not (Test-Path $rembgSrc)) {
+    Write-Host "u2net.onnx not found at $rembgSrc"
+    Write-Host "Trigger the first-run download with:"
+    Write-Host '  python -c "from rembg import new_session; new_session(''u2net'')"'
+    exit 1
+}
+$rembgStage = "_rembg_bundle"
+Write-Host "Staging rembg u2net bundle at $rembgStage ..."
+if (Test-Path $rembgStage) { Remove-Item -Recurse -Force $rembgStage }
+New-Item -ItemType Directory -Path $rembgStage | Out-Null
+Copy-Item $rembgSrc "$rembgStage\"
+$rembg_size = (Get-ChildItem $rembgStage -Recurse | Measure-Object Length -Sum).Sum / 1MB
+Write-Host ("rembg bundle staged: {0:N1} MB" -f $rembg_size)
+
 # Regenerate icon.ico from make_icon.py so a designer edit there flows
 # into the build without a separate manual step.
 Write-Host "Generating icon.ico ..."
@@ -64,16 +86,21 @@ $args = @(
     "--add-data", "app_index.html;.",
     "--add-data", "icon.ico;.",
     "--add-data", "${stage};tesseract",
+    "--add-data", "${rembgStage};u2net",
     "--collect-all", "webview",
     "--collect-all", "cv2",
     "--collect-all", "watchdog",
     "--collect-all", "pynput",
+    "--collect-all", "rembg",
+    "--collect-all", "onnxruntime",
     "--hidden-import", "find_duplicates_local",
     "--hidden-import", "tether",
     "--hidden-import", "pytesseract",
     "--hidden-import", "cv2",
     "--hidden-import", "watchdog",
     "--hidden-import", "pynput",
+    "--hidden-import", "rembg",
+    "--hidden-import", "onnxruntime",
     "app.py"
 )
 & pyinstaller @args
