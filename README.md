@@ -79,15 +79,20 @@ photos into per-magazine units:
 Each photo passes through a local pipeline:
 
 1. **Auto-crop** — `crop_magazine` finds the magazine rectangle in the
-   frame and cuts away background.
+   frame and cuts away background. The primary detector is **rembg**
+   (U²-Net foreground segmentation), which handles complex backgrounds
+   and bound-book scenes where a simple threshold can't separate the
+   page from the surroundings. If rembg can't produce a plausible quad
+   it falls back to the corner-median OpenCV contour detector.
 2. **Perceptual hashing** — pHash + dHash, both 64-bit. Hamming distance
    between hashes is the similarity score.
 3. **OCR date extraction** — Tesseract pulls cover dates from the cropped
    image. A shared date between two covers boosts the match confidence
    significantly.
 
-The bundled `.exe` ships with Tesseract and the English language model
-inside (~70 MB of the binary's size).
+The bundled `.exe` ships with Tesseract, the English language model, and
+the U²-Net weights (`u2net.onnx`) inside. No network is needed on first
+run; everything is embedded.
 
 ## Run from source
 
@@ -112,15 +117,19 @@ via `pytesseract.pytesseract.tesseract_cmd`).
 The script:
 1. Stages a Tesseract bundle from your scoop install into
    `_tesseract_bundle/`
-2. Regenerates `icon.ico` from `make_icon.py` (the two-pill Ditto mark)
-3. Runs PyInstaller with `--onefile --windowed`, embedding the icon,
-   HTML, and Tesseract bundle
+2. Stages `~/.u2net/u2net.onnx` (downloaded automatically on first rembg
+   use) into `_rembg_bundle/`
+3. Regenerates `icon.ico` from `make_icon.py` (the two-pill Ditto mark)
+4. Runs PyInstaller with `--onefile --windowed`, embedding the icon,
+   HTML, both bundles, and `--copy-metadata` for rembg's dependencies
 
-Output: `dist\DuplicateFinder.exe` (~150 MB — most of it is OpenCV,
-NumPy/SciPy, and Tesseract).
+Output: `dist\DuplicateFinder.exe` (~370 MB — Tesseract + U²-Net +
+onnxruntime + scipy/numpy + OpenCV).
 
 If you don't have Tesseract via scoop, edit the `$tessSrc` path at the
-top of `build.ps1` to wherever your `tesseract.exe` lives.
+top of `build.ps1` to wherever your `tesseract.exe` lives. If
+`~/.u2net/u2net.onnx` is missing, trigger the download first with
+`python -c "from rembg import new_session; new_session('u2net')"`.
 
 ## CLI
 
