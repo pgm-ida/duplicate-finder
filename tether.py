@@ -214,6 +214,10 @@ class TetherWatcher:
         self._previous_count = 0
         self._previous_drain_until: Optional[float] = None
         self._cache: dict = {}  # filename -> features (shared library cache)
+        # Low-confidence crops staged in _review/ pending human decision.
+        # Key = filename; value = {review_path, target, route_to_previous,
+        #                          is_first_of_current, meta}
+        self._pending_reviews: dict = {}
 
     # ── Public control ─────────────────────────────────────────────────────
 
@@ -365,6 +369,103 @@ class TetherWatcher:
                 "cover_check": self.cover_check,
                 "rotation_grace_seconds": self.rotation_grace_seconds,
             }
+
+    # ── Review staging ─────────────────────────────────────────────────────
+
+    @property
+    def _review_dir(self) -> Path:
+        return self.library_dir / "_review"
+
+    def accept_auto_crop(self, name: str) -> dict:
+        """Accept the previously-proposed auto crop for a review-staged photo.
+
+        Applies the bgsubtr_bbox from the original detection (not the suspect
+        quad), writes the crop to the magazine folder, computes features, and
+        emits the deferred cover verdict if this was photo #1.
+        """
+        with self._state_lock:
+            review = self._pending_reviews.pop(name, None)
+        if review is None:
+            return {"success": False, "error": f"No pending review for {name!r}"}
+        meta = review.get("meta", {})
+        bgsubtr = meta.get("bgsubtr_bbox")
+        if bgsubtr is None:
+            return {"success": False, "error": "No bgsubtr_bbox in meta — cannot accept"}
+        import numpy as _np
+        bbox = _np.array(bgsubtr, dtype=_np.float32)
+        rect = {
+            "x": int(bbox[:, 0].min()), "y": int(bbox[:, 1].min()),
+            "w": int(bbox[:, 0].max() - bbox[:, 0].min()),
+            "h": int(bbox[:, 1].max() - bbox[:, 1].min()),
+        }
+        return self._resolve_review(name, review, rect=rect)
+
+    def apply_manual_crop(self, name: str, rect: dict) -> dict:
+        """Apply a user-specified axis-aligned crop (rect = {x, y, w, h} in
+        pixels of the original staged image) and complete processing."""
+        with self._state_lock:
+            review = self._pending_reviews.pop(name, None)
+        if review is None:
+            return {"success": False, "error": f"No pending review for {name!r}"}
+        return self._resolve_review(name, review, rect=rect)
+
+    def discard_review(self, name: str) -> dict:
+        """Discard a staged review photo (user chose Reshoot). Removes the
+        staged file and drops the pending state."""
+        with self._state_lock:
+            review = self._pending_reviews.pop(name, None)
+        if review is None:
+            return {"success": False, "error": f"No pending review for {name!r}"}
+        try:
+            Path(review["review_path"]).unlink()
+        except OSError:
+            pass
+        return {"success": True}
+
+    def _resolve_review(self, name: str, review: dict, *, rect: dict) -> dict:
+        """Internal: write a rect crop from the staged file, then finalize."""
+        review_path = Path(review["review_path"])
+        target = Path(review["target"])
+        is_first_of_current = review.get("is_first_of_current", False)
+
+        dst = target / name
+        try:
+            dims = fdl.apply_rect_crop(str(review_path), str(dst), rect)
+        except Exception as e:
+            return {"success": False, "error": f"crop failed: {e}"}
+
+        if dims is None:
+            # Fallback: just move the staged file to the target
+            try:
+                shutil.move(str(review_path), str(dst))
+            except Exception as e:
+                return {"success": False, "error": f"move failed: {e}"}
+        else:
+            try:
+                review_path.unlink()
+            except OSError:
+                pass
+
+        try:
+            self._cache[name] = fdl.compute_features(str(dst))
+            fdl.save_cache(self.library_dir, self._cache)
+        except Exception as e:
+            return {"success": False, "error": f"feature compute failed: {e}"}
+
+        if is_first_of_current and self.cover_check:
+            try:
+                verdict = self._compare_cover_to_library(target, dst)
+                self._emit({"type": "verdict",
+                            "name": target.name,
+                            "kind": verdict["kind"],
+                            "match": verdict.get("match"),
+                            "details": verdict.get("details"),
+                            "cover_only": True})
+            except Exception as e:
+                self._emit({"type": "error",
+                            "message": f"cover check failed for {target.name}: {e}"})
+
+        return {"success": True}
 
     # ── Hotkey ─────────────────────────────────────────────────────────────
 
@@ -525,16 +626,74 @@ class TetherWatcher:
         if target is None:
             return  # extremely unlikely
 
-        # Crop straight into the magazine folder. Cropped-only output: the
-        # original watch-dir file gets deleted after a successful crop.
+        # Crop into the magazine folder. High-confidence crops delete the
+        # original; low-confidence crops stage it in _review/ for human review.
         dst = target / src.name
         crop_ok = False
+        meta = None
         try:
-            dims = fdl.crop_magazine(str(src), str(dst))
+            dims, meta = fdl.crop_magazine_with_meta(str(src), str(dst))
             crop_ok = dims is not None
         except Exception as e:
             self._emit({"type": "error",
                         "message": f"crop failed for {src.name}: {e}"})
+
+        confidence = (meta or {}).get("confidence", "low")
+
+        if confidence == "low":
+            # Stage original for manual review (non-blocking — worker continues)
+            review_dir = self._review_dir
+            try:
+                review_dir.mkdir(parents=True, exist_ok=True)
+                review_dst = review_dir / src.name
+                shutil.move(str(src), str(review_dst))
+            except Exception as e:
+                self._emit({"type": "error",
+                            "message": f"review stage failed for {src.name}: {e}"})
+                return
+
+            is_first_of_current = False
+            with self._state_lock:
+                if route_to_previous:
+                    self._previous_count += 1
+                    count = self._previous_count
+                else:
+                    self._current_photo_count += 1
+                    count = self._current_photo_count
+                    self._last_photo_at = time.monotonic()
+                    is_first_of_current = (count == 1)
+                self._pending_reviews[src.name] = {
+                    "review_path": str(review_dst),
+                    "target": str(target),
+                    "route_to_previous": route_to_previous,
+                    "is_first_of_current": is_first_of_current,
+                    "meta": meta or {},
+                }
+
+            self._emit({"type": "photo_added",
+                        "name": src.name,
+                        "magazine": target.name,
+                        "count": count,
+                        "routed_late": route_to_previous})
+            self._emit({
+                "type": "crop_review",
+                "name": src.name,
+                "magazine": target.name,
+                "proposed_quad": (meta or {}).get("proposed_quad"),
+                "bgsubtr_bbox": (meta or {}).get("bgsubtr_bbox"),
+                "frame_size": (meta or {}).get("frame_size"),
+                "reasons": (meta or {}).get("reasons", []),
+            })
+            # If this was photo #1 of a new magazine, emit a pending verdict
+            if is_first_of_current and self.cover_check:
+                self._emit({"type": "verdict",
+                            "name": target.name,
+                            "kind": "PENDING_REVIEW",
+                            "match": None,
+                            "details": None,
+                            "cover_only": True,
+                            "pending_crop": src.name})
+            return
 
         if not crop_ok:
             try:

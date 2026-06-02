@@ -56,15 +56,16 @@ import tether as _tether
 # The server's served-directory is updated each time the user picks a folder.
 
 class _DynamicHandler(http.server.SimpleHTTPRequestHandler):
-    """SimpleHTTPRequestHandler with two configurable roots:
+    """SimpleHTTPRequestHandler with three configurable roots:
       - `served_directory` (the analyze report folder) for everything
       - `library_directory` for requests under the `/lib/` prefix
-        (used by Shoot mode to show thumbnails of the current magazine)
+      - `review_directory` for requests under the `/review/` prefix
 
-    Both roots can be updated at runtime via class attributes."""
+    All roots can be updated at runtime via class attributes."""
 
     served_directory = "."
     library_directory: "str | None" = None
+    review_directory: "str | None" = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=self.__class__.served_directory, **kwargs)
@@ -73,14 +74,18 @@ class _DynamicHandler(http.server.SimpleHTTPRequestHandler):
         from urllib.parse import unquote
         cls = self.__class__
         raw = path.split("?", 1)[0].split("#", 1)[0]
-        if cls.library_directory and raw.startswith("/lib/"):
-            rel = unquote(raw[len("/lib/"):]).lstrip("/\\")
-            # Disallow absolute paths or "..": normpath collapses ".." segments
-            # which is enough for our local app context.
+
+        def _resolve(root, prefix):
+            rel = unquote(raw[len(prefix):]).lstrip("/\\")
             norm = os.path.normpath(rel)
             if norm.startswith("..") or os.path.isabs(norm):
-                return cls.library_directory
-            return os.path.join(cls.library_directory, norm)
+                return root
+            return os.path.join(root, norm)
+
+        if cls.library_directory and raw.startswith("/lib/"):
+            return _resolve(cls.library_directory, "/lib/")
+        if cls.review_directory and raw.startswith("/review/"):
+            return _resolve(cls.review_directory, "/review/")
         # Refresh directory on every request so set_directory() takes effect.
         self.directory = cls.served_directory
         return super().translate_path(path)
@@ -112,6 +117,9 @@ class ReportServer:
     def set_library_directory(self, path: str):
         _DynamicHandler.library_directory = str(path) if path else None
 
+    def set_review_directory(self, path: str):
+        _DynamicHandler.review_directory = str(path) if path else None
+
     def url_for(self, relative_path: str) -> str:
         return f"http://127.0.0.1:{self.port}/{relative_path}"
 
@@ -119,6 +127,10 @@ class ReportServer:
         # Forward slashes only in URLs, even on Windows.
         rel = str(relative_path).replace("\\", "/").lstrip("/")
         return f"http://127.0.0.1:{self.port}/lib/{rel}"
+
+    def review_url_for(self, relative_path: str) -> str:
+        rel = str(relative_path).replace("\\", "/").lstrip("/")
+        return f"http://127.0.0.1:{self.port}/review/{rel}"
 
 
 class Api:
@@ -262,8 +274,12 @@ class Api:
             # Point the HTTP server's /lib/ prefix at the library so the UI
             # can render thumbnails of the current magazine's photos.
             self.server.set_library_directory(cfg["library_dir"])
+            # Point /review/ at the _review staging directory.
+            review_dir = str(Path(cfg["library_dir"]) / "_review")
+            self.server.set_review_directory(review_dir)
             return {"success": True, "state": self._tether_watcher.get_state(),
-                    "lib_url_base": self.server.lib_url_for("")}
+                    "lib_url_base": self.server.lib_url_for(""),
+                    "review_url_base": self.server.review_url_for("")}
         except Exception as e:
             import traceback
             self._tether_watcher = None
@@ -308,6 +324,24 @@ class Api:
             "magazine": p["magazine"],
             "url": self.server.lib_url_for(f"{p['magazine']}/{p['name']}"),
         } for p in photos]
+
+    def tether_accept_auto_crop(self, name):
+        """Accept the bgsubtr-derived crop for a review-staged photo."""
+        if self._tether_watcher is None:
+            return {"success": False, "error": "Tether not running"}
+        return self._tether_watcher.accept_auto_crop(name)
+
+    def tether_apply_manual_crop(self, name, rect):
+        """Apply user-specified axis-aligned rect crop {x, y, w, h} in pixels."""
+        if self._tether_watcher is None:
+            return {"success": False, "error": "Tether not running"}
+        return self._tether_watcher.apply_manual_crop(name, rect)
+
+    def tether_discard_review(self, name):
+        """Discard the staged review photo (user chose Reshoot)."""
+        if self._tether_watcher is None:
+            return {"success": False, "error": "Tether not running"}
+        return self._tether_watcher.discard_review(name)
 
     def tether_move_to_duplicates(self, magazine_name):
         """Move a magazine folder out of the library into the duplicates dir.

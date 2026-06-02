@@ -275,6 +275,10 @@ input:focus { border-color: var(--accent); }
   background: linear-gradient(135deg, rgba(212,160,71,0.18) 0%, var(--bg-card) 60%);
   border-color: var(--warn);
 }
+.verdict-card.pending_review {
+  background: linear-gradient(135deg, rgba(212,160,71,0.18) 0%, var(--bg-card) 60%);
+  border-color: var(--warn);
+}
 @keyframes flash {
   0% { transform: scale(0.98); }
   50% { transform: scale(1.015); }
@@ -289,6 +293,91 @@ input:focus { border-color: var(--accent); }
 .verdict-card.unique .vbig { color: var(--keep); }
 .verdict-card.duplicate .vbig { color: var(--remove); }
 .verdict-card.uncertain .vbig { color: var(--warn); }
+.verdict-card.pending_review .vbig { color: var(--warn); }
+
+/* ── Crop Review Panel ──────────────────────────────────── */
+#crop-review-panel {
+  margin: 0 10px 8px;
+  border: 1px solid var(--warn);
+  border-radius: 7px;
+  background: var(--bg-card);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.crop-review-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: rgba(212,160,71,0.10);
+  border-bottom: 1px solid var(--warn);
+  font-weight: 600;
+  font-size: 12px;
+}
+.crop-review-badge {
+  background: var(--warn);
+  color: #000;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 8px;
+  min-width: 18px;
+  text-align: center;
+}
+.crop-review-item {
+  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+}
+.crop-review-item:first-child { border-top: none; }
+.cri-header {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 7px;
+}
+.cri-name {
+  font-weight: 600;
+  font-size: 11px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.cri-reasons {
+  font-size: 10px;
+  color: var(--warn);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  flex-shrink: 0;
+}
+.cri-img-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  user-select: none;
+}
+.cri-img {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  width: auto;
+  border-radius: 4px;
+}
+.cri-rect {
+  position: absolute;
+  border: 2px solid var(--warn);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.5);
+  cursor: move;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+.cri-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
 .verdict-card .vlabel {
   font-size: 10px;
   letter-spacing: 1px;
@@ -654,6 +743,15 @@ iframe { width: 100%; height: 100%; border: 0; background: var(--bg); }
         <div class="vactions" id="verdict-actions"></div>
       </div>
 
+      <!-- Crop review panel -->
+      <div id="crop-review-panel" style="display:none">
+        <div class="crop-review-header">
+          <span>Crop review</span>
+          <span class="crop-review-badge" id="crop-review-badge">0</span>
+        </div>
+        <div id="crop-review-list"></div>
+      </div>
+
       <div class="log-wrap">
         <h3>Activity</h3>
         <div class="log" id="log"></div>
@@ -739,6 +837,8 @@ function logMsg(text, cls = '') {
 // ─── Shoot mode controls ─────────────────────────────────
 let tetherRunning = false;
 let libUrlBase = '';            // e.g. http://127.0.0.1:PORT/lib/
+let reviewUrlBase = '';         // e.g. http://127.0.0.1:PORT/review/
+let pendingReviews = {};        // name → {evt, rect} for low-confidence crops
 let currentMagName = null;      // name of the magazine the thumb strip shows
 let thumbPhotos = [];           // [{name, late}] in arrival order
 
@@ -856,6 +956,7 @@ async function startTether() {
   if (!res.success) { showToast('Could not start', res.error || 'Unknown error'); return; }
   tetherRunning = true;
   libUrlBase = res.lib_url_base || '';
+  reviewUrlBase = res.review_url_base || '';
   setUiRunning(true);
   document.getElementById('cur-mag').textContent = 'watching';
   document.getElementById('tether-dot').classList.add('running');
@@ -944,9 +1045,10 @@ function setVerdict(kind, magName, info, chips) {
   const card = document.getElementById('verdict-card');
   card.className = 'verdict-card ' + (kind || 'idle').toLowerCase();
   card.querySelector('.vbig').textContent = (
-    kind === 'UNIQUE'    ? '✓ UNIQUE' :
-    kind === 'DUPLICATE' ? '⚠ DUPLICATE' :
-    kind === 'UNCERTAIN' ? '? UNCERTAIN' : '—'
+    kind === 'UNIQUE'         ? '✓ UNIQUE' :
+    kind === 'DUPLICATE'      ? '⚠ DUPLICATE' :
+    kind === 'UNCERTAIN'      ? '? UNCERTAIN' :
+    kind === 'PENDING_REVIEW' ? '… REVIEW' : '—'
   );
   document.getElementById('verdict-mag').textContent = magName || '';
   document.getElementById('verdict-info').innerHTML = info || '';
@@ -988,6 +1090,156 @@ async function moveToDuplicates(magName) {
   chipsEl.appendChild(chip);
 }
 
+// ─── Crop review panel ────────────────────────────────────
+function _updateReviewBadge() {
+  const n = Object.keys(pendingReviews).length;
+  const badge = document.getElementById('crop-review-badge');
+  const panel = document.getElementById('crop-review-panel');
+  if (badge) badge.textContent = n;
+  if (panel) panel.style.display = n ? '' : 'none';
+}
+
+function _bboxToRect(bbox) {
+  if (!bbox || !bbox.length) return null;
+  const xs = bbox.map(p => p[0]);
+  const ys = bbox.map(p => p[1]);
+  return {x: Math.min(...xs), y: Math.min(...ys),
+          w: Math.max(...xs) - Math.min(...xs),
+          h: Math.max(...ys) - Math.min(...ys)};
+}
+
+function _quadBbox(quad) {
+  if (!quad || !quad.length) return null;
+  const xs = quad.map(p => p[0]);
+  const ys = quad.map(p => p[1]);
+  return {x: Math.min(...xs), y: Math.min(...ys),
+          w: Math.max(...xs) - Math.min(...xs),
+          h: Math.max(...ys) - Math.min(...ys)};
+}
+
+function addCropReviewItem(evt) {
+  const name = evt.name;
+  const url = reviewUrlBase ? `${reviewUrlBase}${encodeURIComponent(name)}` : '';
+  const frameW = (evt.frame_size || [])[0] || 1;
+  const frameH = (evt.frame_size || [])[1] || 1;
+
+  let initRect = _bboxToRect(evt.bgsubtr_bbox)
+                 || _quadBbox(evt.proposed_quad)
+                 || {x: 0, y: 0, w: frameW, h: frameH};
+  pendingReviews[name] = {evt, rect: {...initRect}};
+
+  const list = document.getElementById('crop-review-list');
+  const item = document.createElement('div');
+  item.className = 'crop-review-item';
+  item.id = `cri-${CSS.escape(name)}`;
+
+  item.innerHTML = `
+    <div class="cri-header">
+      <span class="cri-name" title="${name}">${name}</span>
+      <span class="cri-reasons">${(evt.reasons||[]).join(' · ')}</span>
+    </div>
+    <div class="cri-img-wrap" id="cri-wrap-${CSS.escape(name)}">
+      <img class="cri-img" id="cri-img-${CSS.escape(name)}"
+           src="${url}" alt="${name}" draggable="false">
+      <div class="cri-rect" id="cri-rect-${CSS.escape(name)}"></div>
+    </div>
+    <div class="cri-actions">
+      <button class="btn" onclick="acceptAutoCrop(${JSON.stringify(name)})">✓ Accept</button>
+      <button class="btn" onclick="applyManualCrop(${JSON.stringify(name)})">✂ Adjust &amp; Apply</button>
+      <button class="btn danger" onclick="discardReview(${JSON.stringify(name)})">✕ Reshoot</button>
+    </div>`;
+
+  list.appendChild(item);
+
+  const img = item.querySelector('.cri-img');
+  img.addEventListener('load', () => _positionRect(name));
+  if (img.complete) _positionRect(name);
+
+  _makeRectInteractive(name, frameW, frameH);
+  _updateReviewBadge();
+}
+
+function _positionRect(name) {
+  const img = document.getElementById(`cri-img-${CSS.escape(name)}`);
+  const rect = document.getElementById(`cri-rect-${CSS.escape(name)}`);
+  const entry = pendingReviews[name];
+  if (!img || !rect || !entry) return;
+  const r = entry.rect;
+  const evt = entry.evt;
+  const frameW = (evt.frame_size || [])[0] || 1;
+  const frameH = (evt.frame_size || [])[1] || 1;
+  const scaleX = img.clientWidth / frameW;
+  const scaleY = img.clientHeight / frameH;
+  rect.style.left   = Math.round(r.x * scaleX) + 'px';
+  rect.style.top    = Math.round(r.y * scaleY) + 'px';
+  rect.style.width  = Math.round(r.w * scaleX) + 'px';
+  rect.style.height = Math.round(r.h * scaleY) + 'px';
+}
+
+function _makeRectInteractive(name, frameW, frameH) {
+  const img  = document.getElementById(`cri-img-${CSS.escape(name)}`);
+  const rect = document.getElementById(`cri-rect-${CSS.escape(name)}`);
+  if (!img || !rect) return;
+
+  let dragging = false, sx, sy, sr;
+
+  rect.addEventListener('mousedown', e => {
+    e.preventDefault();
+    dragging = true;
+    sx = e.clientX; sy = e.clientY;
+    const entry = pendingReviews[name];
+    sr = entry ? {...entry.rect} : {x:0, y:0, w:frameW, h:frameH};
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const entry = pendingReviews[name];
+    if (!entry) return;
+    const scaleX = img.clientWidth / frameW;
+    const scaleY = img.clientHeight / frameH;
+    const dx = (e.clientX - sx) / scaleX;
+    const dy = (e.clientY - sy) / scaleY;
+    entry.rect = {
+      x: Math.max(0, Math.min(frameW - sr.w, sr.x + dx)),
+      y: Math.max(0, Math.min(frameH - sr.h, sr.y + dy)),
+      w: sr.w, h: sr.h,
+    };
+    _positionRect(name);
+  });
+
+  document.addEventListener('mouseup', () => { dragging = false; });
+}
+
+async function acceptAutoCrop(name) {
+  const r = await window.pywebview.api.tether_accept_auto_crop(name);
+  if (!r || !r.success) { showToast('Accept failed', (r && r.error) || 'Unknown error'); return; }
+  _removeCropReviewItem(name);
+  logMsg(`✓ Accepted auto crop: ${name}`, 'event');
+}
+
+async function applyManualCrop(name) {
+  const entry = pendingReviews[name];
+  if (!entry) return;
+  const r = await window.pywebview.api.tether_apply_manual_crop(name, entry.rect);
+  if (!r || !r.success) { showToast('Apply failed', (r && r.error) || 'Unknown error'); return; }
+  _removeCropReviewItem(name);
+  logMsg(`✂ Manual crop applied: ${name}`, 'event');
+}
+
+async function discardReview(name) {
+  const r = await window.pywebview.api.tether_discard_review(name);
+  if (!r || !r.success) { showToast('Discard failed', (r && r.error) || 'Unknown error'); return; }
+  _removeCropReviewItem(name);
+  logMsg(`✕ Discarded (reshoot): ${name}`, 'event');
+}
+
+function _removeCropReviewItem(name) {
+  delete pendingReviews[name];
+  const el = document.getElementById(`cri-${CSS.escape(name)}`);
+  if (el) el.remove();
+  _updateReviewBadge();
+}
+
 // ─── Tether event handler (called from Python) ──────────
 window.onTetherEvent = function(evt) {
   if (!evt) return;
@@ -1027,6 +1279,9 @@ window.onTetherEvent = function(evt) {
         info = `Matches <span class="match-name">${m.name || '?'}</span>`;
       } else if (evt.kind === 'UNCERTAIN') {
         info = `Similar to <span class="match-name">${m.name || '?'}</span> — verify visually.`;
+      } else if (evt.kind === 'PENDING_REVIEW') {
+        info = `Cover crop needs review — verdict deferred.`;
+        chips.push('pending crop');
       }
       if (evt.cover_only) chips.push('cover-only');
       if (m.score !== undefined) chips.push(`distance ${m.score}`);
@@ -1039,6 +1294,10 @@ window.onTetherEvent = function(evt) {
       logMsg(`◆ ${evt.kind}: ${evt.name}` + (m.name ? ` (match: ${m.name})` : ''), 'verdict');
       break;
     }
+    case 'crop_review':
+      addCropReviewItem(evt);
+      logMsg(`⚠ Crop needs review: ${evt.name} (${(evt.reasons||[]).join(', ')})`, 'event');
+      break;
     case 'info':
       logMsg(`ⓘ ${evt.message}`, 'event');
       break;

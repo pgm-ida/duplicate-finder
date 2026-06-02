@@ -286,16 +286,107 @@ def _find_magazine_quad_rembg(img_bgr):
     return quad
 
 
-def crop_magazine(src_path, dst_path) -> tuple[int, int] | None:
-    """Detect the magazine in `src_path`, perspective-warp it onto a clean
-    rectangle, and save to `dst_path` as JPEG. Returns (width, height) of the
-    output, or None on failure (in which case dst_path is not written)."""
+def _find_magazine_bbox_bgsubtr(img_bgr):
+    """Border-sampling background subtraction.
+
+    Learns the background colour from the image border, builds a foreground
+    mask, and returns an axis-aligned bounding box as
+    np.float32 [[x_min,y_min],[x_max,y_min],[x_max,y_max],[x_min,y_max]]
+    (TL, TR, BR, BL order), or None if the foreground is indistinguishable
+    from the background (e.g. white magazine on white background).
+    """
     if not _CV2_AVAILABLE:
         return None
     import numpy as _np
+    h, w = img_bgr.shape[:2]
+
+    # Sample border strip (≈5% of shorter dimension, min 10 px)
+    bw = max(10, min(h, w) // 20)
+    border = _np.concatenate([
+        img_bgr[:bw, :].reshape(-1, 3),
+        img_bgr[-bw:, :].reshape(-1, 3),
+        img_bgr[:, :bw].reshape(-1, 3),
+        img_bgr[:, -bw:].reshape(-1, 3),
+    ])
+    bg_color = _np.median(border, axis=0).astype(_np.float32)
+
+    # Per-pixel max-channel distance from background colour
+    diff = _np.abs(img_bgr.astype(_np.float32) - bg_color).max(axis=2)
+
+    # Light backgrounds (nearly white) need a stricter threshold to avoid
+    # paper-texture noise registering as foreground.
+    bg_brightness = float(bg_color.max())
+    threshold = 30 if bg_brightness > 200 else 20
+
+    fg_mask = (diff > threshold).astype(_np.uint8) * 255
+
+    # White-on-white / very-low-contrast: nothing to detect
+    fg_ratio = float(fg_mask.sum()) / (255.0 * h * w)
+    if fg_ratio < 0.05:
+        return None
+
+    # Morphological cleanup: close bridges text/fold gaps; open removes noise
+    k = max(15, min(h, w) // 100)
+    kernel = _cv2.getStructuringElement(_cv2.MORPH_RECT, (k, k))
+    fg_mask = _cv2.morphologyEx(fg_mask, _cv2.MORPH_CLOSE, kernel, iterations=2)
+    fg_mask = _cv2.morphologyEx(fg_mask, _cv2.MORPH_OPEN,  kernel, iterations=1)
+
+    ys, xs = _np.where(fg_mask > 0)
+    if not xs.size:
+        return None
+
+    x_min, x_max = int(xs.min()), int(xs.max())
+    y_min, y_max = int(ys.min()), int(ys.max())
+
+    # Near-full-frame result means the background sample is unreliable
+    if (x_max - x_min) * (y_max - y_min) > 0.97 * h * w:
+        return None
+
+    return _np.array([
+        [x_min, y_min],  # TL
+        [x_max, y_min],  # TR
+        [x_max, y_max],  # BR
+        [x_min, y_max],  # BL
+    ], dtype=_np.float32)
+
+
+def crop_magazine_with_meta(src_path, dst_path):
+    """Detect + warp the magazine and return (dims, meta).
+
+    dims is (width, height) if a crop was written, else None.
+    meta = {
+      method:        'rembg'|'opencv'|'bgsubtr'|None,
+      confidence:    'high'|'low',
+      proposed_quad: [[x,y],…] | None,   # raw detector output (4 pts)
+      bgsubtr_bbox:  [[x,y],…] | None,   # axis-aligned TL/TR/BR/BL
+      frame_size:    [w, h],
+      reasons:       [str, …],           # why confidence is 'low'
+    }
+
+    Resolution order:
+      1. Validated quad → perspective warp           → confidence='high'
+      2. No quad at all + bgsubtr bbox available
+         → axis-aligned crop                         → confidence='high'
+      3. Quad present but rejected, OR both absent   → no crop written
+                                                     → confidence='low'
+    """
+    _err = lambda r: (None, {"method": None, "confidence": "low",
+                              "proposed_quad": None, "bgsubtr_bbox": None,
+                              "frame_size": [0, 0], "reasons": [r]})
+    if not _CV2_AVAILABLE:
+        return _err("cv2_unavailable")
+    import numpy as _np
     img = _cv2.imread(str(src_path))
     if img is None:
-        return None
+        return _err("image_unreadable")
+
+    h, w = img.shape[:2]
+    frame_area = float(h * w)
+
+    bgsubtr_bbox = _find_magazine_bbox_bgsubtr(img)
+    bgsubtr_list = bgsubtr_bbox.tolist() if bgsubtr_bbox is not None else None
+
+    # Primary: rembg; fallback: opencv
     quad = None
     method_used = None
     if rembg_available():
@@ -306,24 +397,159 @@ def crop_magazine(src_path, dst_path) -> tuple[int, int] | None:
         quad = _find_magazine_quad(img)
         if quad is not None:
             method_used = "opencv"
-    _LOGGER.info(
-        "crop %s: method=%s", Path(src_path).name, method_used or "none"
-    )
+
+    proposed_quad = quad.tolist() if quad is not None else None
+
+    # ── Confidence assessment ────────────────────────────────────────────
+    reasons: list = []
     if quad is None:
+        reasons.append("no_quad")
+    else:
+        quad_area = float(_cv2.contourArea(quad.astype(_np.float32)))
+
+        # Envelope: quad must cover ≥70% of bgsubtr bbox area
+        if bgsubtr_bbox is not None:
+            bbox_area = float(_cv2.contourArea(bgsubtr_bbox.astype(_np.float32)))
+            if bbox_area > 0 and quad_area < 0.70 * bbox_area:
+                reasons.append("quad_inside_bbox_envelope")
+
+        # Size: quad < 15% of frame is implausible
+        if quad_area < 0.15 * frame_area:
+            reasons.append("quad_too_small")
+
+        # Orientation: portrait source should not yield landscape quad
+        ordered = _order_quad(quad)
+        tl, tr, br, bl = ordered
+        q_w = float(_np.linalg.norm(tr - tl))
+        q_h = float(_np.linalg.norm(bl - tl))
+        if h > w and q_w > 0 and q_h > 0 and q_w > q_h:
+            reasons.append("orientation_flip")
+
+        # Aspect ratio
+        if q_w > 0 and q_h > 0:
+            asp = q_w / q_h
+            if asp < 0.3 or asp > 2.0:
+                reasons.append("aspect_out_of_range")
+
+    quad_valid = quad is not None and not reasons
+
+    # ── Resolution order ─────────────────────────────────────────────────
+    dims = None
+    final_method = method_used
+    confidence = "high"
+
+    if quad_valid:
+        # 1. Validated quad → perspective warp
+        ordered = _order_quad(quad)
+        tl, tr, br, bl = ordered
+        out_w = int(max(_np.linalg.norm(br - bl), _np.linalg.norm(tr - tl)))
+        out_h = int(max(_np.linalg.norm(tr - br), _np.linalg.norm(tl - bl)))
+        if out_w >= 100 and out_h >= 100:
+            dst_pts = _np.array(
+                [[0, 0], [out_w - 1, 0], [out_w - 1, out_h - 1], [0, out_h - 1]],
+                dtype=_np.float32,
+            )
+            M = _cv2.getPerspectiveTransform(ordered, dst_pts)
+            warped = _cv2.warpPerspective(img, M, (out_w, out_h))
+            _cv2.imwrite(str(dst_path), warped,
+                         [_cv2.IMWRITE_JPEG_QUALITY, CROP_JPEG_QUALITY])
+            dims = (out_w, out_h)
+        else:
+            reasons.append("quad_too_small_after_warp")
+            confidence = "low"
+
+    elif quad is None and bgsubtr_bbox is not None:
+        # 2. No quad detected at all, but bgsubtr found the cover extent
+        x_min = int(bgsubtr_bbox[:, 0].min())
+        x_max = int(bgsubtr_bbox[:, 0].max())
+        y_min = int(bgsubtr_bbox[:, 1].min())
+        y_max = int(bgsubtr_bbox[:, 1].max())
+        x_min, y_min = max(0, x_min), max(0, y_min)
+        x_max, y_max = min(w, x_max), min(h, y_max)
+        out_w = x_max - x_min
+        out_h = y_max - y_min
+        if out_w >= 100 and out_h >= 100:
+            cropped = img[y_min:y_max, x_min:x_max]
+            _cv2.imwrite(str(dst_path), cropped,
+                         [_cv2.IMWRITE_JPEG_QUALITY, CROP_JPEG_QUALITY])
+            dims = (out_w, out_h)
+            final_method = "bgsubtr"
+        else:
+            reasons.append("bgsubtr_bbox_too_small")
+            confidence = "low"
+
+    else:
+        # 3. Quad present but rejected, or both detectors failed → low
+        confidence = "low"
+        if not reasons:
+            reasons.append("no_bbox_detected")
+
+    _LOGGER.info("crop %s: method=%s confidence=%s reasons=%s",
+                 Path(src_path).name, final_method or "none", confidence, reasons)
+
+    return dims, {
+        "method": final_method,
+        "confidence": confidence,
+        "proposed_quad": proposed_quad,
+        "bgsubtr_bbox": bgsubtr_list,
+        "frame_size": [w, h],
+        "reasons": reasons,
+    }
+
+
+def crop_magazine(src_path, dst_path) -> tuple[int, int] | None:
+    """Detect the magazine in `src_path`, perspective-warp it onto a clean
+    rectangle, and save to `dst_path` as JPEG. Returns (width, height) of the
+    output, or None on failure (in which case dst_path is not written).
+
+    Backward-compatible thin wrapper around crop_magazine_with_meta.
+    """
+    dims, _ = crop_magazine_with_meta(src_path, dst_path)
+    return dims
+
+
+def apply_crop_from_meta(src_path, dst_path, meta: dict) -> "tuple[int,int] | None":
+    """Apply the bgsubtr_bbox from a previous crop_magazine_with_meta call.
+
+    Used when the user accepts a low-confidence auto crop: the bgsubtr bbox
+    is the reliable fallback (the proposed_quad is the suspect detection).
+    Returns (out_w, out_h) or None.
+    """
+    bgsubtr_bbox = meta.get("bgsubtr_bbox")
+    if bgsubtr_bbox is None:
         return None
-    quad = _order_quad(quad)
-    tl, tr, br, bl = quad
-    out_w = int(max(_np.linalg.norm(br - bl), _np.linalg.norm(tr - tl)))
-    out_h = int(max(_np.linalg.norm(tr - br), _np.linalg.norm(tl - bl)))
-    if out_w < 100 or out_h < 100:
+    import numpy as _np
+    bbox = _np.array(bgsubtr_bbox, dtype=_np.float32)
+    x_min = int(bbox[:, 0].min()); x_max = int(bbox[:, 0].max())
+    y_min = int(bbox[:, 1].min()); y_max = int(bbox[:, 1].max())
+    return apply_rect_crop(src_path, dst_path,
+                           {"x": x_min, "y": y_min,
+                            "w": x_max - x_min, "h": y_max - y_min})
+
+
+def apply_rect_crop(src_path, dst_path, rect: dict) -> "tuple[int,int] | None":
+    """Crop src_path to the axis-aligned rect {x, y, w, h} (pixels in the
+    original image) and save to dst_path as JPEG. Returns (out_w, out_h) or None.
+    """
+    if not _CV2_AVAILABLE:
         return None
-    dst = _np.array(
-        [[0, 0], [out_w - 1, 0], [out_w - 1, out_h - 1], [0, out_h - 1]],
-        dtype=_np.float32,
-    )
-    M = _cv2.getPerspectiveTransform(quad, dst)
-    warped = _cv2.warpPerspective(img, M, (out_w, out_h))
-    _cv2.imwrite(str(dst_path), warped, [_cv2.IMWRITE_JPEG_QUALITY, CROP_JPEG_QUALITY])
+    import numpy as _np
+    img = _cv2.imread(str(src_path))
+    if img is None:
+        return None
+    ih, iw = img.shape[:2]
+    x  = max(0, int(rect.get("x", 0)))
+    y  = max(0, int(rect.get("y", 0)))
+    rw = int(rect.get("w", iw))
+    rh = int(rect.get("h", ih))
+    x2 = min(iw, x + rw)
+    y2 = min(ih, y + rh)
+    out_w = x2 - x
+    out_h = y2 - y
+    if out_w < 10 or out_h < 10:
+        return None
+    cropped = img[y:y2, x:x2]
+    _cv2.imwrite(str(dst_path), cropped, [_cv2.IMWRITE_JPEG_QUALITY, CROP_JPEG_QUALITY])
     return (out_w, out_h)
 
 
