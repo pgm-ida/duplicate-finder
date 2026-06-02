@@ -97,6 +97,12 @@ if getattr(sys, "frozen", False):
     if _bundled_u2net.is_dir():
         os.environ.setdefault("U2NET_HOME", str(_bundled_u2net))
 
+# Minimum fraction of the frame a detected cover must occupy to be trusted.
+# Covers are often shot with a large margin of background (subject ~10% of a
+# landscape frame), so this floor is deliberately low; the shape/aspect/
+# even-sides checks reject spurious small blobs (hands, shadows) instead.
+MIN_QUAD_AREA_FRAC = 0.04
+
 _REMBG_AVAILABLE: "bool | None" = None  # None = not yet probed
 _rembg_new_session = None  # populated on first successful probe
 _rembg_remove = None
@@ -245,7 +251,7 @@ def _find_magazine_quad_rembg(img_bgr):
     # Too small → rembg found nothing plausible. Typically means the input
     # is already cropped (no clear foreground/background contrast) or the
     # subject is genuinely tiny — either way fall back to the OpenCV detector.
-    if area < 0.15 * frame_area:
+    if area < MIN_QUAD_AREA_FRAC * frame_area:
         return None
     # Too large → whole-frame mask. rembg sometimes does this on
     # already-cropped inputs or when foreground/background are inseparable.
@@ -342,6 +348,16 @@ def _find_magazine_bbox_bgsubtr(img_bgr):
     if (x_max - x_min) * (y_max - y_min) > 0.97 * h * w:
         return None
 
+    # Solidity guard: a real cover fills its bounding box densely (about
+    # 0.57-0.77). A scuffed/low-contrast background over-segments into
+    # scattered foreground across a large, mostly-empty bbox (about 0.25).
+    # Reject sparse detections so a garbage bbox cannot masquerade as the
+    # cover extent and wrongly veto a correct rembg quad via the envelope check.
+    bbox_area = (x_max - x_min + 1) * (y_max - y_min + 1)
+    fg_inside = int((fg_mask[y_min:y_max + 1, x_min:x_max + 1] > 0).sum())
+    if bbox_area > 0 and fg_inside / bbox_area < 0.40:
+        return None
+
     return _np.array([
         [x_min, y_min],  # TL
         [x_max, y_min],  # TR
@@ -414,7 +430,7 @@ def crop_magazine_with_meta(src_path, dst_path):
                 reasons.append("quad_inside_bbox_envelope")
 
         # Size: quad < 15% of frame is implausible
-        if quad_area < 0.15 * frame_area:
+        if quad_area < MIN_QUAD_AREA_FRAC * frame_area:
             reasons.append("quad_too_small")
 
         # Orientation: portrait source should not yield landscape quad
