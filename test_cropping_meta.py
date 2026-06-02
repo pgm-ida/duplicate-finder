@@ -144,7 +144,7 @@ class TestCropMagazineWithMeta:
         dst = tmp_path / "out.jpg"
 
         # Small nested quad (≈6% of frame area)
-        small = _small_quad(img, scale=0.25)
+        small = _small_quad(img, scale=0.15)
 
         orig_rembg = fdl._find_magazine_quad_rembg
         orig_cv = fdl._find_magazine_quad
@@ -158,7 +158,7 @@ class TestCropMagazineWithMeta:
                 f"expected confidence=low for nested quad, got {meta['confidence']!r}. "
                 f"reasons={meta['reasons']}"
             )
-            assert "quad_inside_bbox_envelope" in meta["reasons"]
+            assert "quad_too_small" in meta["reasons"]
             assert not dst.exists(), "should not write a crop for low confidence"
             assert dims is None
         finally:

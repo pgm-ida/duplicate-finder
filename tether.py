@@ -626,87 +626,37 @@ class TetherWatcher:
         if target is None:
             return  # extremely unlikely
 
-        # Crop into the magazine folder. High-confidence crops delete the
-        # original; low-confidence crops stage it in _review/ for human review.
+        # Always crop into the magazine folder and keep every photo. There is
+        # no review staging: a successful crop is written to the magazine
+        # folder and the original full-frame photo is backed up to
+        # <magazine>/_originals/ (recoverable if a crop is ever wrong). If
+        # nothing croppable was detected, the original is kept in the magazine
+        # folder uncropped so the photo still lands in the right issue.
         dst = target / src.name
         crop_ok = False
-        meta = None
         try:
-            dims, meta = fdl.crop_magazine_with_meta(str(src), str(dst))
+            dims, _meta = fdl.crop_magazine_with_meta(str(src), str(dst))
             crop_ok = dims is not None
         except Exception as e:
-            self._emit({"type": "error",
-                        "message": f"crop failed for {src.name}: {e}"})
+            self._emit({"type": "error", "message": f"crop failed for {src.name}: {e}"})
 
-        confidence = (meta or {}).get("confidence", "low")
-
-        if confidence == "low":
-            # Stage original for manual review (non-blocking — worker continues)
-            review_dir = self._review_dir
+        if crop_ok:
             try:
-                review_dir.mkdir(parents=True, exist_ok=True)
-                review_dst = review_dir / src.name
-                shutil.move(str(src), str(review_dst))
+                originals_dir = target / "_originals"
+                originals_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(originals_dir / src.name))
             except Exception as e:
-                self._emit({"type": "error",
-                            "message": f"review stage failed for {src.name}: {e}"})
-                return
-
-            is_first_of_current = False
-            with self._state_lock:
-                if route_to_previous:
-                    self._previous_count += 1
-                    count = self._previous_count
-                else:
-                    self._current_photo_count += 1
-                    count = self._current_photo_count
-                    self._last_photo_at = time.monotonic()
-                    is_first_of_current = (count == 1)
-                self._pending_reviews[src.name] = {
-                    "review_path": str(review_dst),
-                    "target": str(target),
-                    "route_to_previous": route_to_previous,
-                    "is_first_of_current": is_first_of_current,
-                    "meta": meta or {},
-                }
-
-            self._emit({"type": "photo_added",
-                        "name": src.name,
-                        "magazine": target.name,
-                        "count": count,
-                        "routed_late": route_to_previous})
-            self._emit({
-                "type": "crop_review",
-                "name": src.name,
-                "magazine": target.name,
-                "proposed_quad": (meta or {}).get("proposed_quad"),
-                "bgsubtr_bbox": (meta or {}).get("bgsubtr_bbox"),
-                "frame_size": (meta or {}).get("frame_size"),
-                "reasons": (meta or {}).get("reasons", []),
-            })
-            # If this was photo #1 of a new magazine, emit a pending verdict
-            if is_first_of_current and self.cover_check:
-                self._emit({"type": "verdict",
-                            "name": target.name,
-                            "kind": "PENDING_REVIEW",
-                            "match": None,
-                            "details": None,
-                            "cover_only": True,
-                            "pending_crop": src.name})
-            return
-
-        if not crop_ok:
+                self._emit({"type": "error", "message": f"original backup failed for {src.name}: {e}"})
+                try:
+                    src.unlink()
+                except OSError:
+                    pass
+        else:
             try:
                 shutil.move(str(src), str(dst))
             except Exception as e:
-                self._emit({"type": "error",
-                            "message": f"move failed for {src.name}: {e}"})
+                self._emit({"type": "error", "message": f"move failed for {src.name}: {e}"})
                 return
-        else:
-            try:
-                src.unlink()
-            except OSError:
-                pass
 
         # Compute features and stash in cache (keyed by filename so the
         # existing duplicate-finder cache lookup keeps working).

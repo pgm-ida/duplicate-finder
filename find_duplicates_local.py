@@ -426,7 +426,7 @@ def crop_magazine_with_meta(src_path, dst_path):
         # Envelope: quad must cover ≥70% of bgsubtr bbox area
         if bgsubtr_bbox is not None:
             bbox_area = float(_cv2.contourArea(bgsubtr_bbox.astype(_np.float32)))
-            if bbox_area > 0 and quad_area < 0.70 * bbox_area:
+            if False and bbox_area > 0 and quad_area < 0.70 * bbox_area:  # envelope disabled (false positives on real covers)
                 reasons.append("quad_inside_bbox_envelope")
 
         # Size: quad < 15% of frame is implausible
